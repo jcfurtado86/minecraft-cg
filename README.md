@@ -2,7 +2,20 @@
 
 Um cenário no estilo Minecraft feito em C com OpenGL no pipeline fixo, como material da disciplina de Computação Gráfica.
 
-O código inteiro está em um único arquivo, [`mine.c`](mine.c), comentado para ser lido do começo ao fim.
+O código inteiro está em um único arquivo, [`mine.c`](mine.c), comentado para ser lido do começo ao fim. Ele é organizado em seções, nesta ordem:
+
+| Seção | Conteúdo |
+|---|---|
+| Constantes | Tipos de bloco, tamanho do mundo, medidas do personagem e da câmera |
+| Declarações antecipadas | Funções e variáveis usadas antes de serem definidas; servem de índice |
+| MUNDO | Mapa, matriz do mundo, construção e desenho dos blocos |
+| COLISÃO | Posição do personagem e colisão com o mundo |
+| CÂMERA | Projeção, direção do olhar, primeira e terceira pessoa, desenho do personagem |
+| ENTRADA | Teclado, mouse, roda e atualização do movimento |
+| MENU | Menu de pausa com as instruções (ESC) |
+| QUADRO E PROGRAMA PRINCIPAL | Desenho do quadro, FPS e `main` |
+
+As funções centrais têm um comentário antes delas explicando o que fazem e por quê.
 
 ## O que tem no cenário
 
@@ -12,22 +25,27 @@ O código inteiro está em um único arquivo, [`mine.c`](mine.c), comentado para
 - Uma praia e o mar.
 - Uma árvore no formato do Minecraft.
 - Duas nuvens.
+- Um personagem no estilo do Minecraft, com braços e pernas que balançam ao andar.
+- Um menu de pausa (ESC) com as instruções de movimentação.
 
 Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posições diferentes. Não há texturas nem iluminação: cada face recebe um brilho fixo (topo claro, laterais médias, base escura), o que dá a impressão de volume.
 
-## Conteúdos das semanas 1 a 4
+## Conteúdos das semanas 1 a 5
 
 | Semana | Conteúdo | Onde aparece no código |
 |---|---|---|
-| 1 | Janela, laço principal, tempo de quadro, FPS no título, ESC | `main`, `desenha`, `ocioso` |
+| 1 | Janela, laço principal, tempo de quadro, FPS no título, ESC | `main`, `desenha`, `atualiza` |
 | 2 | Primitivas (`GL_QUADS`) e cor por face | `desenhaBloco`, `corDaFace` |
 | 3 | Cubo 3D, buffer de profundidade, descarte de faces, instâncias com `glPushMatrix`/`glPopMatrix` | `desenhaBloco`, `blocoEm` |
-| 4 | Perspectiva, correção de proporção, câmera com `gluLookAt`, navegação pelo teclado | `redimensiona`, `desenha`, `teclado` |
+| 4 | Perspectiva, correção de proporção, câmera com `gluLookAt`, navegação pelo teclado | `aplicaProjecao`, `redimensiona`, `posicionaCamera` |
+| 5 | Teclado por estado e tempo de quadro; mouse com yaw e pitch e captura do cursor; matriz do mundo e colisão por caixa alinhada aos eixos; primeira e terceira pessoa; zoom pela roda | `teclado`, `tecladoSolto`, `atualiza`, `mundo`, `posicaoLivre`, `moveJogador`, `direcaoDoOlhar`, `movimentoMouse`, `posicionaCamera`, `desenhaJogador`, `rodaMouse` |
 
 ## Dependências
 
 - Compilador C (`gcc`)
 - OpenGL, GLU, GLUT (freeglut) e GLEW
+
+É preciso usar a **freeglut**, não outra GLUT: a roda do mouse usa `glutMouseWheelFunc`, que é extensão da freeglut, e descer com Shift usa `GLUT_KEY_SHIFT_L`, das versões mais novas dela (testado com a 3.4).
 
 **Ubuntu / Debian**
 ```bash
@@ -57,15 +75,24 @@ mine.exe
 
 ## Controles
 
-| Tecla | Ação |
-|---|---|
-| W / S | Andar para frente / para trás |
-| A / D | Andar para a esquerda / para a direita |
-| ← / → | Girar a câmera |
-| ↑ / ↓ | Subir / descer |
-| ESC | Sair |
+| Entrada | Ação | Leitura |
+|---|---|---|
+| W / S | Andar para frente / para trás | estado |
+| A / D | Andar para a esquerda / para a direita | estado |
+| R (segurando) | Correr (dobra a velocidade) | estado |
+| ← / → | Girar o olhar | estado |
+| Espaço ou ↑ / Shift ou ↓ | Subir / descer | estado |
+| Mouse | Direção do olhar (já começa capturado) | evento de movimento |
+| Roda ou + / - | Aproximar / afastar (campo de visão) | evento |
+| Tab | Liberar / capturar o cursor (clicar na janela também captura) | evento |
+| F5 ou V | Alternar primeira / terceira pessoa | evento |
+| P | Alternar perspectiva / ortográfica | evento |
+| ESC | Abrir / fechar o menu de pausa, com as instruções de movimentação | evento |
+| Q (com o menu aberto) | Sair | evento |
 
-A câmera começa sobre o mar, olhando para a terra.
+A coluna "Leitura" diz como cada entrada é tratada: ações contínuas, que duram enquanto a tecla está pressionada, são lidas **por estado** a cada quadro; ações discretas, que acontecem uma vez por toque, são tratadas **por evento**.
+
+O personagem começa no gramado, olhando para a montanha, com a câmera em terceira pessoa. Não há gravidade: para subir um degrau, use Espaço ou ↑. O mouse já começa controlando o olhar; Tab libera o cursor, e Tab ou um clique na janela o capturam de novo.
 
 ## Como o cenário é montado
 
@@ -90,7 +117,7 @@ O acesso é `mapa[z][x]`, com a linha antes da coluna. Assim a tabela aparece no
 
 ### Do mapa aos blocos
 
-1. `desenhaCena` percorre os 16 × 16 quadrados do mapa e chama `colunaEm(x, z)` para cada um.
+1. `construirMundo`, chamada uma única vez no início, percorre os 16 × 16 quadrados do mapa e chama `colunaEm(x, z)` para cada um.
 2. `colunaEm` lê a altura `h` no mapa e empilha blocos de `y = 0` até o topo. Para cada andar, uma sequência de `if` escolhe o tipo comparando `y` com `h`:
    - acima do chão e até o nível da água: **água**
    - coluna baixa: **areia**
@@ -98,15 +125,21 @@ O acesso é `mapa[z][x]`, com a linha antes da coluna. Assim a tabela aparece no
    - topo: **grama**
    - dois andares abaixo do topo: **terra**
    - o resto: **pedra**
-3. `blocoEm(tipo, x, y, z)` desloca a origem com `glTranslatef` e desenha o cubo de sempre ali.
-4. `arvoreEm` e `nuvemEm` usam o mesmo `blocoEm` para montar a árvore e as nuvens.
+3. Cada bloco é gravado com `colocaBloco(tipo, x, y, z)` na matriz `mundo`.
+4. `arvoreEm` e `nuvemEm` usam o mesmo `colocaBloco` para montar a árvore e as nuvens.
+5. A cada quadro, `desenhaCena` percorre a matriz e chama `blocoEm(tipo, x, y, z)` para cada posição ocupada, que desloca a origem com `glTranslatef` e desenha o cubo de sempre ali.
 
-Os blocos não ficam guardados em lugar nenhum: a cada quadro a cena é recalculada e redesenhada a partir do mapa.
+### A matriz do mundo
+
+`mundo[x][y][z]` guarda o tipo de cada bloco (ou `VAZIO`) numa grade de 16 × 16 × 16. **Atenção à ordem**: o `mapa` é `[z][x]`, para parecer o mundo visto de cima, mas o `mundo` segue a ordem dos eixos, `[x][y][z]`. Todo acesso passa por `colocaBloco` e `blocoNoMundo`, que também testam os limites.
+
+A matriz é o que permite a colisão: a célula que contém um ponto `(px, py, pz)` é `(floor(px), floor(py), floor(pz))`, então saber se o personagem bate num bloco é consultar as poucas células que a caixa dele ocupa (`posicaoLivre`). Fora do mundo conta como sólido, e a água não é sólida.
 
 ## Experimente
 
 - **Mudar o terreno**: edite os números da matriz `mapa`. Um `0` no meio do gramado vira um lago; um `9` vira uma torre.
 - **Mais ou menos neve**: altere `NIVEL_NEVE`.
-- **Outra árvore**: acrescente `arvoreEm(x, z);` em `desenhaCena`, num quadrado de grama.
-- **Outra nuvem**: acrescente `nuvemEm(x, z, largura, fundo);` em `desenhaCena`.
-- **Um tipo de bloco novo**: crie um `#define` (por exemplo, `#define MADEIRA 10`) e acrescente um `case` com a cor em `corDaFace`.
+- **Outra árvore**: acrescente `arvoreEm(x, z);` em `construirMundo`, num quadrado de grama.
+- **Outra nuvem**: acrescente `nuvemEm(x, z, largura, fundo);` em `construirMundo`.
+- **Um tipo de bloco novo**: crie um `#define` (por exemplo, `#define MADEIRA 20`; de 10 a 16 já são as cores do personagem) e acrescente um `case` com a cor em `corDaFace`.
+- **Quebrar um bloco**: `colocaBloco(VAZIO, x, y, z)` depois de `construirMundo`; o desenho e a colisão passam a ver o buraco.
