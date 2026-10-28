@@ -49,10 +49,18 @@
 #include <windows.h>
 #endif
 
+#ifdef __APPLE__
+/* macOS: usa a GLUT e o OpenGL nativos da Apple, sem GLEW; essa GLUT
+   não tem a roda do mouse nem o Shift como tecla especial */
+#define GL_SILENCE_DEPRECATION
+#include <GLUT/glut.h>
+#include <OpenGL/glu.h>
+#else
 #include <GL/glew.h>            /* carrega as funções do OpenGL */
 #include <GL/freeglut.h>        /* janela, teclado, mouse e laço principal;
                                    a versão freeglut traz a roda do mouse */
 #include <GL/glu.h>             /* gluPerspective e gluLookAt */
+#endif
 
 #include <stdio.h>              /* printf, sprintf */
 #include <stdlib.h>             /* exit */
@@ -1162,8 +1170,12 @@ void atualiza(void)
        mas a freeglut (a partir da 3.0) o entrega como tecla especial,
        GLUT_KEY_SHIFT_L ou _R, e ele entra em especiais[] como as setas */
     int sobe  = especiais[GLUT_KEY_UP]   || teclas[' '];
+#ifdef __APPLE__
+    int desce = especiais[GLUT_KEY_DOWN];
+#else
     int desce = especiais[GLUT_KEY_DOWN] || especiais[GLUT_KEY_SHIFT_L]
                                          || especiais[GLUT_KEY_SHIFT_R];
+#endif
     float subir = (float)(sobe - desce);
 
     float antesX = jogadorX, antesZ = jogadorZ;
@@ -1440,12 +1452,14 @@ int main(int argc, char **argv)
     glutInitWindowSize(larguraJanela, alturaJanela);
     glutCreateWindow("Minecraft");
 
+#ifndef __APPLE__
     /* a GLEW só pode ser iniciada depois que a janela existe */
     GLenum err = glewInit();
     if (err != GLEW_OK) {
         printf("Erro GLEW: %s\n", glewGetErrorString(err));
         return 1;
     }
+#endif
 
     printf("OpenGL %s | %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));
 
@@ -1462,7 +1476,9 @@ int main(int argc, char **argv)
     glutSpecialUpFunc(especialSolto);       /* tecla especial solta */
     glutPassiveMotionFunc(movimentoMouse);  /* mouse movido sem botão */
     glutMotionFunc(movimentoMouse);         /* mouse movido com botão */
+#ifndef __APPLE__
     glutMouseWheelFunc(rodaMouse);          /* roda do mouse (freeglut) */
+#endif
     glutMouseFunc(cliqueMouse);             /* clique: captura o cursor */
     glutEntryFunc(entradaJanela);           /* cursor entrou na janela */
 
