@@ -8,6 +8,7 @@ O código inteiro está em um único arquivo, [`mine.c`](mine.c), comentado para
 |---|---|
 | Constantes | Tipos de bloco, tamanho do mundo, medidas do personagem e da câmera |
 | Declarações antecipadas | Funções e variáveis usadas antes de serem definidas; servem de índice |
+| TEXTURAS E TRANSPARÊNCIA | Tudo o que a aula de texturas trouxe, num bloco só: atlas, célula de cada face, faces ocultas, casinha de vidro e três passadas |
 | MUNDO | Mapa, matriz do mundo, construção e desenho dos blocos |
 | COLISÃO | Posição do personagem e colisão com o mundo |
 | CÂMERA | Projeção, direção do olhar, primeira e terceira pessoa, desenho do personagem |
@@ -23,14 +24,15 @@ As funções centrais têm um comentário antes delas explicando o que fazem e p
 - Uma montanha irregular com neve no topo.
 - Um gramado com um laguinho.
 - Uma praia e o mar.
-- Uma árvore no formato do Minecraft.
+- Uma árvore no formato do Minecraft, com as folhas vazadas.
+- Uma casinha de vidro ao lado de onde o personagem começa.
 - Duas nuvens.
 - Um personagem no estilo do Minecraft, com braços e pernas que balançam ao andar.
 - Um menu de pausa (ESC) com as instruções de movimentação.
 
-Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posições diferentes. Não há texturas nem iluminação: cada face recebe um brilho fixo (topo claro, laterais médias, base escura), o que dá a impressão de volume.
+Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posições diferentes. Os blocos do terreno são texturizados com um atlas pixelado; a água e o vidro são semitransparentes. Não há iluminação: cada face recebe um brilho fixo (topo claro, laterais médias, base escura), multiplicado pela textura, o que dá a impressão de volume. As nuvens e o personagem continuam com cor sólida.
 
-## Conteúdos das semanas 1 a 5
+## Conteúdos por aula
 
 | Semana | Conteúdo | Onde aparece no código |
 |---|---|---|
@@ -39,6 +41,7 @@ Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posi�
 | 3 | Cubo 3D, buffer de profundidade, descarte de faces, instâncias com `glPushMatrix`/`glPopMatrix` | `desenhaBloco`, `blocoEm` |
 | 4 | Perspectiva, correção de proporção, câmera com `gluLookAt`, navegação pelo teclado | `aplicaProjecao`, `redimensiona`, `posicionaCamera` |
 | 5 | Teclado por estado e tempo de quadro; mouse com yaw e pitch e captura do cursor; matriz do mundo e colisão por caixa alinhada aos eixos; primeira e terceira pessoa; zoom pela roda | `teclado`, `tecladoSolto`, `atualiza`, `mundo`, `posicaoLivre`, `moveJogador`, `direcaoDoOlhar`, `movimentoMouse`, `posicionaCamera`, `desenhaJogador`, `rodaMouse` |
+| Texturas e transparência | Atlas lido de um PPM e enviado com `glTexImage2D`; células por face e `glTexCoord2f`; filtro `GL_NEAREST` (visual pixelado) e `GL_MODULATE`; alfa por cor-chave; recorte com `GL_ALPHA_TEST` nas folhas; mistura com `GL_BLEND` e `glDepthMask` no vidro e na água, em três passadas, com os semitransparentes ordenados; faces ocultas por vizinho opaco | `lerPPM`, `converteRGBA`, `carregaAtlas`, `celulaDaFace`, `coordenadasDaCelula`, `desenhaBloco`, `faceVisivel`, `facesVisiveis`, `desenhaOpacos`, `listaTransparentes`, `desenhaTransparentes`, `casinhaEm` |
 
 ## Dependências
 
@@ -59,6 +62,8 @@ sudo pacman -S gcc freeglut glew glu
 
 **Windows**: use o MinGW com as bibliotecas freeglut e GLEW instaladas.
 
+**macOS**: não precisa instalar nada; o código usa a GLUT e o OpenGL que já vêm no sistema (blocos `#ifdef __APPLE__`). Essa GLUT não tem a roda do mouse nem avisa o Shift sozinho, então no Mac o zoom é só por `+`/`-` e descer é só pela seta ↓. O olhar pelo mouse também é tratado à parte: a GLUT da Apple trava o mouse por 0,25 s a cada reposicionamento do cursor, então no Mac o cursor é desacoplado do mouse e o deslocamento é lido direto do sistema (por isso o `-framework ApplicationServices`).
+
 ## Como compilar e rodar
 
 **Linux**
@@ -72,6 +77,33 @@ gcc mine.c -o mine -lGLEW -lGL -lGLU -lglut -lm
 gcc mine.c -o mine.exe -lglew32 -lfreeglut -lopengl32 -lglu32
 mine.exe
 ```
+
+**macOS**
+```bash
+clang mine.c -o mine -framework OpenGL -framework GLUT -framework ApplicationServices -lm
+./mine
+```
+
+Rode o jogo **de dentro da pasta do projeto**: ele lê o `atlas.ppm` da pasta atual e, se não achar o arquivo, avisa no terminal e fecha.
+
+## Atlas de texturas
+
+Todas as faces vêm de uma única imagem, `atlas.ppm`: 64 × 64 pixels divididos em células de 16 × 16, quatro por linha. O arquivo é gerado pelo script `gerar_atlas.py`, que desenha cada célula com um pouco de ruído pixelado (só biblioteca padrão do Python):
+
+```bash
+python3 gerar_atlas.py
+```
+
+| Célula | Aparência | | Célula | Aparência |
+|---|---|---|---|---|
+| 0 | grama, topo | | 6 | folha (vazados em magenta) |
+| 1 | grama, lateral | | 7 | vidro |
+| 2 | terra | | 8 | água |
+| 3 | pedra | | 9 | areia |
+| 4 | anéis da madeira | | 10 | neve |
+| 5 | casca | | 11 a 15 | livres |
+
+O formato PPM (`P6`) não tem canal alfa. Na leitura, o jogo transforma o magenta (255, 0, 255) em transparente e dá opacidade parcial às células de vidro (0,4) e de água (0,6).
 
 ## Controles
 
@@ -87,7 +119,7 @@ mine.exe
 | Tab | Liberar / capturar o cursor (clicar na janela também captura) | evento |
 | F5 ou V | Alternar primeira / terceira pessoa | evento |
 | P | Alternar perspectiva / ortográfica | evento |
-| ESC | Abrir / fechar o menu de pausa, com as instruções de movimentação | evento |
+| ESC | Abrir / fechar o menu de pausa, com os controles | evento |
 | Q (com o menu aberto) | Sair | evento |
 
 A coluna "Leitura" diz como cada entrada é tratada: ações contínuas, que duram enquanto a tecla está pressionada, são lidas **por estado** a cada quadro; ações discretas, que acontecem uma vez por toque, são tratadas **por evento**.
@@ -126,8 +158,16 @@ O acesso é `mapa[z][x]`, com a linha antes da coluna. Assim a tabela aparece no
    - dois andares abaixo do topo: **terra**
    - o resto: **pedra**
 3. Cada bloco é gravado com `colocaBloco(tipo, x, y, z)` na matriz `mundo`.
-4. `arvoreEm` e `nuvemEm` usam o mesmo `colocaBloco` para montar a árvore e as nuvens.
-5. A cada quadro, `desenhaCena` percorre a matriz e chama `blocoEm(tipo, x, y, z)` para cada posição ocupada, que desloca a origem com `glTranslatef` e desenha o cubo de sempre ali.
+4. `arvoreEm`, `casinhaEm` e `nuvemEm` usam o mesmo `colocaBloco` para montar a árvore, a casinha de vidro e as nuvens.
+5. A cada quadro, a matriz é percorrida e `blocoEm(tipo, x, y, z)` é chamada para cada posição ocupada: ela desloca a origem com `glTranslatef` e desenha ali o cubo de sempre, só com as faces que nenhum vizinho opaco esconde (`facesVisiveis`).
+
+### Desenho em três passadas
+
+A mistura do vidro e da água usa a cor que já está na tela, então a ordem de desenho importa:
+
+1. **Opacos** (terra, pedra, grama, tronco, areia, neve, nuvens), em `desenhaOpacos`.
+2. **Recorte**: as folhas, com o teste de alfa ligado; os vazados são descartados. Logo depois vem o personagem.
+3. **Semitransparentes**: vidro e água, em `desenhaTransparentes`, ordenados do mais distante ao mais próximo da câmera, com a mistura ligada e a escrita de profundidade desligada.
 
 ### A matriz do mundo
 
@@ -141,5 +181,5 @@ A matriz é o que permite a colisão: a célula que contém um ponto `(px, py, p
 - **Mais ou menos neve**: altere `NIVEL_NEVE`.
 - **Outra árvore**: acrescente `arvoreEm(x, z);` em `construirMundo`, num quadrado de grama.
 - **Outra nuvem**: acrescente `nuvemEm(x, z, largura, fundo);` em `construirMundo`.
-- **Um tipo de bloco novo**: crie um `#define` (por exemplo, `#define MADEIRA 20`; de 10 a 16 já são as cores do personagem) e acrescente um `case` com a cor em `corDaFace`.
+- **Um tipo de bloco novo**: crie um `#define` (por exemplo, `#define MADEIRA 20`; de 10 a 16 são as cores do personagem e 17 é o vidro), desenhe a célula em `gerar_atlas.py` (há 5 livres) e acrescente o `case` em `celulaDaFace`. Para cor sólida, sem textura, o `case` vai em `corDaFace`.
 - **Quebrar um bloco**: `colocaBloco(VAZIO, x, y, z)` depois de `construirMundo`; o desenho e a colisão passam a ver o buraco.
