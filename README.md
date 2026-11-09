@@ -88,11 +88,15 @@ Rode o jogo **de dentro da pasta do projeto**: ele lê o `atlas.ppm` da pasta at
 
 ## Atlas de texturas
 
-Todas as faces vêm de uma única imagem, `atlas.ppm`: 64 × 64 pixels divididos em células de 16 × 16, quatro por linha. O arquivo é gerado pelo script `gerar_atlas.py`, que desenha cada célula com um pouco de ruído pixelado (só biblioteca padrão do Python):
+Todas as faces vêm de uma única imagem, `atlas.ppm`: 64 × 64 pixels divididos em células de 16 × 16, quatro por linha. Cada célula tem um pouco de ruído pixelado, no estilo do Minecraft.
+
+Para mudar uma textura, edite a imagem num editor qualquer (por exemplo, salvando como PNG) e converta de volta para PPM binário com o ImageMagick:
 
 ```bash
-python3 gerar_atlas.py
+magick atlas.png atlas.ppm
 ```
+
+O leitor do jogo não aceita linhas de comentário (`#`) no cabeçalho do PPM. Alguns editores, como o GIMP, gravam uma; por isso a conversão final pelo ImageMagick.
 
 | Célula | Aparência | | Célula | Aparência |
 |---|---|---|---|---|
@@ -181,5 +185,5 @@ A matriz é o que permite a colisão: a célula que contém um ponto `(px, py, p
 - **Mais ou menos neve**: altere `NIVEL_NEVE`.
 - **Outra árvore**: acrescente `arvoreEm(x, z);` em `construirMundo`, num quadrado de grama.
 - **Outra nuvem**: acrescente `nuvemEm(x, z, largura, fundo);` em `construirMundo`.
-- **Um tipo de bloco novo**: crie um `#define` (por exemplo, `#define MADEIRA 20`; de 10 a 16 são as cores do personagem e 17 é o vidro), desenhe a célula em `gerar_atlas.py` (há 5 livres) e acrescente o `case` em `celulaDaFace`. Para cor sólida, sem textura, o `case` vai em `corDaFace`.
+- **Um tipo de bloco novo**: crie um `#define` (por exemplo, `#define MADEIRA 20`; de 10 a 16 são as cores do personagem e 17 é o vidro), desenhe a célula no `atlas.ppm` (há 5 livres) e acrescente o `case` em `celulaDaFace`. Para cor sólida, sem textura, o `case` vai em `corDaFace`.
 - **Quebrar um bloco**: `colocaBloco(VAZIO, x, y, z)` depois de `construirMundo`; o desenho e a colisão passam a ver o buraco.

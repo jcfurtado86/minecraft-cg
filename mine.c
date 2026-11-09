@@ -24,9 +24,9 @@
  * uma árvore, uma casinha de vidro e duas nuvens. Tudo é feito com um
  * único cubo de lado 1, desenhado várias vezes em posições diferentes.
  *
- * Texturas: todas as faces vêm de uma única imagem, atlas.ppm, gerada
- * por gerar_atlas.py (python3 gerar_atlas.py a regenera). O jogo lê o
- * arquivo da pasta atual, então precisa ser rodado da pasta do projeto.
+ * Texturas: todas as faces vêm de uma única imagem, atlas.ppm. O jogo
+ * lê o arquivo da pasta atual, então precisa ser rodado da pasta do
+ * projeto.
  *
  * Eixos do mundo:
  *   x  esquerda (0) para a direita (15)
@@ -144,7 +144,7 @@
 /* Uma única imagem com a aparência de todas as faces, dividida em    */
 /* CELULAS_POR_LADO x CELULAS_POR_LADO células de mesmo tamanho. Cada */
 /* CEL_ é o índice de uma célula, contado da esquerda para a direita  */
-/* e de cima para baixo. O arquivo é gerado por gerar_atlas.py.       */
+/* e de cima para baixo.                                              */
 /* ------------------------------------------------------------------ */
 
 #define ARQUIVO_ATLAS    "atlas.ppm"
@@ -398,7 +398,7 @@ void desenhaMenu(void);             /* chamada por desenha(), depois da cena */
 /*   RGB RGB RGB ...                                                  */
 /*                                                                    */
 /* O leitor assume um cabeçalho sem linhas de comentário (#), como o  */
-/* que gerar_atlas.py grava. Devolve NULL se o arquivo não abrir ou   */
+/* do atlas.ppm. Devolve NULL se o arquivo não abrir ou               */
 /* não for um P6 completo, com no máximo 4096 pixels de lado.        */
 /* ------------------------------------------------------------------ */
 
