@@ -1,5 +1,7 @@
 # minecraft-cg
 
+![Demonstração: o personagem passa pela casinha de vidro, olha as folhas da árvore em primeira pessoa, atravessa o lago e a câmera volta a mostrar a ilha](midia/demo.webp)
+
 Um cenário no estilo Minecraft feito em C com OpenGL no pipeline fixo, como material da disciplina de Computação Gráfica.
 
 O código inteiro está em um único arquivo, [`mine.c`](mine.c), comentado para ser lido do começo ao fim. Ele é organizado em seções, nesta ordem:
