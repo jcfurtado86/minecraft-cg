@@ -1,7 +1,7 @@
 /*
  * Projeto Minecraft
  *
- * Reúne o que foi visto nas semanas 1 a 5 e na aula de texturas e
+ * Reúne o que foi visto nas semanas 1 a 8 e na aula de texturas e
  * transparência:
  *   Semana 1: janela, laço principal, tempo de quadro, FPS no título, ESC
  *   Semana 2: primitivas (GL_QUADS) e cor por face
@@ -19,12 +19,19 @@
  *             com cor-chave, recorte (teste de alfa) nas folhas,
  *             mistura no vidro e na água, desenho em três passadas e
  *             remoção das faces que um vizinho opaco esconde
+ *  Semana 8: incorporação de plantas como plano cruzado, itens largados
+ *             no chão como sprites, céu como skydome, com sol e lua,
+ *             neblina e ciclo de dia e noite.
  *
  * Cenário: terreno 16 x 16 com uma montanha, uma praia e o mar,
  * uma árvore, uma casinha de vidro e duas nuvens. Tudo é feito com um
  * único cubo de lado 1, desenhado várias vezes em posições diferentes.
  *
  * Texturas: todas as faces vêm de uma única imagem, atlas.ppm. O jogo
+ * lê o arquivo da pasta atual, então precisa ser rodado da pasta do
+ * projeto.
+ *
+ * Astros: são carregados a partir dos arquivos sol.ppm e lua.ppm. O jogo
  * lê o arquivo da pasta atual, então precisa ser rodado da pasta do
  * projeto.
  *
@@ -45,6 +52,7 @@
  *   Tab          liberar / capturar o cursor; clique também captura
  *   F5 ou V      alternar terceira (início) / primeira pessoa
  *   P            alternar perspectiva / ortográfica
+ *   T            acelera ciclo de dia e noite
  *   ESC          abrir / fechar o menu (pausa, instruções)
  *   Q            sair (com o menu aberto)
  *
@@ -117,6 +125,7 @@
 #define OLHO_BRANCO 15
 #define OLHO    16
 #define VIDRO   17      /* semitransparente, da casinha de vidro */
+#define PLANTA  18
 
 /* Em que passada de desenho cada tipo entra (ver desenhaOpacos):
    opacos primeiro, depois o recorte (folhas, com vazados) e por último
@@ -569,8 +578,12 @@ void coordenadasDaCelula(int celula, float *s0, float *t0, float *lado)
 
 int passadaDoBloco(int tipo)
 {
-    if (tipo == FOLHA) return PASSADA_RECORTE;
-    if (tipo == VIDRO || tipo == AGUA) return PASSADA_TRANSLUCIDA;
+    if (tipo == FOLHA || tipo == PLANTA)
+        return PASSADA_RECORTE;
+
+    if (tipo == VIDRO || tipo == AGUA)
+        return PASSADA_TRANSLUCIDA;
+
     return PASSADA_OPACA;
 }
 
@@ -658,6 +671,160 @@ void casinhaEm(int x, int z)
 }
 
 /* ------------------------------------------------------------------ */
+/* Itens largados e plantas: os itens são representados pela estrutura */
+/* ItemDrop, que armazena sua posição no cenário, a célula da textura  */
+/* e uma fase utilizada para diferenciar a animação de flutuação.     */
+/*                                                                    */
+/* A função desenhaItem() posiciona o objeto no mundo, aplica um      */
+/* movimento vertical suave utilizando sinf() e gira sua representação */
+/* conforme a direção horizontal da câmera (yaw), criando um billboard.*/
+/* Os itens podem utilizar texturas do atlas ou uma representação     */
+/* provisória desenhada diretamente com polígonos e cores.            */
+/*                                                                    */
+/* A função desenhaPlanta() utiliza a textura de uma folha para        */
+/* construir dois planos diagonais cruzados, formando um modelo       */
+/* tridimensional simples. O descarte de faces traseiras é desativado */
+/* temporariamente para que a planta seja visível de ambos os lados.  */
+/* Ao final, os estados gráficos utilizados são restaurados.           */
+/* ------------------------------------------------------------------ */
+
+/* Itens largados no chão: ficam fora da matriz mundo */
+typedef struct {
+    float x, y, z;  /* posição no cenário */
+    int celula;     /* célula do atlas */
+    float fase;     /* diferença na flutuação */
+} ItemDrop;
+
+/* Desenha um item como uma imagem que acompanha a direção da câmera */
+void desenhaItem(ItemDrop item, float tempo)
+{
+    float s0, t0, lado;
+    float altura;
+    float largura = 0.45f;
+
+    /* Movimento suave para cima e para baixo */
+    altura = item.y + 0.08f * sinf(tempo * 2.0f + item.fase);
+
+    glPushMatrix();
+
+    /* Posiciona o item no mundo */
+    glTranslatef(item.x, altura, item.z);
+
+    /* Gira o item para acompanhar a direção horizontal da câmera */
+    glRotatef(-yaw, 0.0f, 1.0f, 0.0f);
+
+    if (item.celula != SEM_TEXTURA) {
+        coordenadasDaCelula(item.celula, &s0, &t0, &lado);
+
+        glEnable(GL_TEXTURE_2D);
+        glColor3f(1.0f, 1.0f, 1.0f);
+
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.5f);
+
+        glBegin(GL_QUADS);
+            glTexCoord2f(s0, t0 + lado);
+            glVertex3f(-largura, 0.0f, 0.0f);
+
+            glTexCoord2f(s0 + lado, t0 + lado);
+            glVertex3f(largura, 0.0f, 0.0f);
+
+            glTexCoord2f(s0 + lado, t0);
+            glVertex3f(largura, 0.7f, 0.0f);
+
+            glTexCoord2f(s0, t0);
+            glVertex3f(-largura, 0.7f, 0.0f);
+        glEnd();
+        glDisable(GL_ALPHA_TEST);
+    }
+    else {
+        /* Maçã provisória: um desenho vermelho */
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(0.85f, 0.05f, 0.05f);
+
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.5f);
+
+        glBegin(GL_QUADS);
+            glVertex3f(-largura, 0.0f, 0.0f);
+            glVertex3f(largura, 0.0f, 0.0f);
+            glVertex3f(largura, 0.7f, 0.0f);
+            glVertex3f(-largura, 0.7f, 0.0f);
+        glEnd();
+        glDisable(GL_ALPHA_TEST);
+    }
+
+    glPopMatrix();
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_2D);
+}
+
+void desenhaPlanta(int x, int y, int z)
+{
+    float s0, t0, lado;
+
+    /* Obtém as coordenadas da textura da folha no atlas */
+    coordenadasDaCelula(CEL_FOLHA, &s0, &t0, &lado);
+
+    /* Desliga o descarte de faces traseiras.
+       Assim, a planta aparece dos dois lados. */
+    glDisable(GL_CULL_FACE);
+
+    /* Ativa a textura e o teste de transparência */
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.5f);
+
+    /* Cor branca para não alterar as cores originais da textura */
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    glPushMatrix();
+    glTranslatef((float)x, (float)y, (float)z);
+
+    /* Primeiro plano: diagonal de um canto ao outro */
+    glBegin(GL_QUADS);
+
+        glTexCoord2f(s0,       t0 + lado);
+        glVertex3f(0.15f, 0.0f, 0.15f);
+
+        glTexCoord2f(s0 + lado, t0 + lado);
+        glVertex3f(0.85f, 0.0f, 0.85f);
+
+        glTexCoord2f(s0 + lado, t0);
+        glVertex3f(0.85f, 0.9f, 0.85f);
+
+        glTexCoord2f(s0,       t0);
+        glVertex3f(0.15f, 0.9f, 0.15f);
+
+    glEnd();
+
+    /* Segundo plano: diagonal cruzada com o primeiro */
+    glBegin(GL_QUADS);
+
+        glTexCoord2f(s0,       t0 + lado);
+        glVertex3f(0.15f, 0.0f, 0.85f);
+
+        glTexCoord2f(s0 + lado, t0 + lado);
+        glVertex3f(0.85f, 0.0f, 0.15f);
+
+        glTexCoord2f(s0 + lado, t0);
+        glVertex3f(0.85f, 0.9f, 0.15f);
+
+        glTexCoord2f(s0,       t0);
+        glVertex3f(0.15f, 0.9f, 0.85f);
+
+    glEnd();
+
+    glPopMatrix();
+
+    /* Restaura os estados usados pelo restante do cenário */
+    glDisable(GL_ALPHA_TEST);
+    glEnable(GL_CULL_FACE);
+}
+
+
+/* ------------------------------------------------------------------ */
 /* A cena inteira, em três passadas. Percorre a matriz do mundo, que  */
 /* construirMundo() já preencheu, e desenha cada bloco na passada do  */
 /* seu tipo (passadaDoBloco):                                         */
@@ -681,15 +848,28 @@ void casinhaEm(int x, int z)
 static void desenhaPassada(int passada)
 {
     int x, y, z;
+    int tipo;
 
     for (x = 0; x < LADO; x++)
         for (y = 0; y < ALTURA_MUNDO; y++)
-            for (z = 0; z < LADO; z++)
-                if (mundo[x][y][z] != VAZIO &&
-                    passadaDoBloco(mundo[x][y][z]) == passada)
-                    blocoEm(mundo[x][y][z], x, y, z);
-}
+            for (z = 0; z < LADO; z++) {
 
+                tipo = mundo[x][y][z];
+
+                if (tipo == VAZIO)
+                    continue;
+
+                if (passadaDoBloco(tipo) != passada)
+                    continue;
+
+                if (tipo == PLANTA) {
+                    desenhaPlanta(x, y, z);
+                }
+                else {
+                    blocoEm(tipo, x, y, z);
+                }
+            }
+}
 /* passadas 1 e 2 */
 void desenhaOpacos(void)
 {
@@ -871,7 +1051,7 @@ static const int bitDaFace[6] = {
     FACE_FRENTE, FACE_TRAS, FACE_DIREITA, FACE_ESQUERDA, FACE_TOPO, FACE_BASE
 };
 
-static const float brilhoDaFace[6] = { 0.80f, 0.80f, 0.65f, 0.65f, 1.00f, 0.50f };
+static const float normalDaFace[6][3] = {{0,0,1}, {0,0,-1}, {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}};
 
 static const float verticesDaFace[6][4][3] = {
     { {0,0,1}, {1,0,1}, {1,1,1}, {0,1,1} },     /* frente (z = 1) */
@@ -894,10 +1074,10 @@ void desenhaBloco(int tipo, float tom, int faces)
     glBegin(GL_QUADS);
     for (f = 0; f < 6; f++) {
         if (!(faces & bitDaFace[f])) continue;
+        glNormal3f(normalDaFace[f][0], normalDaFace[f][1], normalDaFace[f][2]);
 
         if (texturizado) {
             float s0, t0, lado;
-            float b = brilhoDaFace[f];
 
             coordenadasDaCelula(celulaDaFace(tipo, bitDaFace[f]), &s0, &t0, &lado);
             /* s e t de cada canto, na ordem dos vértices da tabela:
@@ -905,14 +1085,14 @@ void desenhaBloco(int tipo, float tom, int faces)
             float s[4] = { s0, s0 + lado, s0 + lado, s0 };
             float t[4] = { t0 + lado, t0 + lado, t0, t0 };
 
-            glColor3f(b, b, b);
+            glColor3f(1.0f, 1.0f, 1.0f);
             for (v = 0; v < 4; v++) {
                 glTexCoord2f(s[v], t[v]);
                 glVertex3f(verticesDaFace[f][v][0], verticesDaFace[f][v][1],
                            verticesDaFace[f][v][2]);
             }
         } else {
-            corDaFace(tipo, brilhoDaFace[f], tom);
+            corDaFace(tipo, 1.0f, tom);
             for (v = 0; v < 4; v++)
                 glVertex3f(verticesDaFace[f][v][0], verticesDaFace[f][v][1],
                            verticesDaFace[f][v][2]);
@@ -920,6 +1100,7 @@ void desenhaBloco(int tipo, float tom, int faces)
     }
     glEnd();
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Instância (semana 3): desenha um bloco do tipo pedido na posição   */
@@ -1155,7 +1336,14 @@ void construirMundo(void)
 
     arvoreEm(13, 6);                        /* no gramado, à direita da montanha */
     casinhaEm(4, 7);                        /* à esquerda de onde o personagem começa */
-
+ 
+    colocaBloco(PLANTA, 2, 3, 10);          /* Plantas espalhadas pelo gramado */
+    colocaBloco(PLANTA, 3, 3, 10);
+    colocaBloco(PLANTA, 9, 3, 10);
+    colocaBloco(PLANTA, 10, 3, 10);
+    colocaBloco(PLANTA, 8, 3, 12);
+    colocaBloco(PLANTA, 14, 3, 10);
+   
     nuvemEm(1, 2, 5, 3);                    /* sobre a montanha */
     nuvemEm(10, 0, 4, 2);                   /* sobre a árvore, mais ao fundo */
 }
@@ -1194,7 +1382,7 @@ int blocoSolido(int x, int y, int z)
     if (!dentroDoMundo(x, y, z)) return 1;  /* fora do mundo: parede */
 
     tipo = mundo[x][y][z];
-    return tipo != VAZIO && tipo != AGUA;
+    return tipo != VAZIO && tipo != AGUA && tipo != PLANTA;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1257,6 +1445,34 @@ void moveJogador(float dx, float dy, float dz)
         movePedaco(dx / pedacos, dy / pedacos, dz / pedacos);
 }
 
+/* ------------------------------------------------------------------ */
+/* Itens espalhados pelo cenário: são definidos três objetos          */
+/* utilizando a estrutura ItemDrop, que armazena a posição (x, y, z), */
+/* o tipo de bloco representado e o deslocamento inicial da animação. */
+/*                                                                    */
+/* A função desenhaItensCenario() percorre o vetor de itens e chama   */
+/* desenhaItem() para renderizar cada objeto. O tempo decorrido desde  */
+/* o início do programa é obtido por glutGet(GLUT_ELAPSED_TIME),       */
+/* permitindo controlar a animação dos itens de forma contínua.       */
+/* ------------------------------------------------------------------ */
+
+#define NUM_ITENS 3
+
+ItemDrop itens[NUM_ITENS] = {
+    {11.5f, 3.05f, 10.5f, CEL_FOLHA,  0.0f }, /* muda */
+    {12.5f, 3.05f, 10.5f, CEL_TERRA,  2.0f }, /* terra */
+    {13.5f, 3.05f, 10.5f, SEM_TEXTURA, 4.0f } /* maçã */
+};
+
+
+/* Desenha os itens espalhados pelo cenário */
+void desenhaItensCenario(void){
+    int i;
+    float tempo = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
+
+    for (i = 0; i < NUM_ITENS; i++)
+        desenhaItem(itens[i], tempo);
+}
 
 /* ================================================================== */
 /* CÂMERA                                                             */
@@ -1478,6 +1694,244 @@ void posicionaCamera(void)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Configuração do ciclo de dia e noite: define a estrutura Cor,       */
+/* utilizada para representar cores RGB, e a função lerp(), que      */
+/* realiza a interpolação entre duas cores. Também são definidos     */
+/* o ângulo e a inclinação do percurso solar, a duração do ciclo e    */
+/* as cores utilizadas para representar o céu e a iluminação durante */
+/* o dia e a noite. Essas variáveis são atualizadas conforme a        */
+/* passagem do tempo, permitindo a transição gradual entre os períodos.*/
+/* ------------------------------------------------------------------ */
+
+typedef struct { float r, g, b; } Cor;
+
+static Cor lerp(Cor a, Cor b, float t)
+{
+Cor c = { a.r + (b.r - a.r) * t,
+            a.g + (b.g - a.g) * t,
+              a.b + (b.b - a.b) * t };
+    return c;
+}
+
+#define INCLINACAO_SOL (25.0f * PI / 180.0f)    /* o caminho do sol é inclinado, para as faces +z e -z também receberem luz */
+
+float anguloSol = 60.0f;        /* graus: 0 nasce, 90 meio-dia, 180 se põe, 270 meia-noite */
+float duracaoCiclo = 180.0f;    /* segundos por volta; a tecla T alterna com 20 */
+
+Cor corHorizonte = { 0.53f, 0.81f, 0.92f };     /* a cada quadro, essas cores são atualizadas */
+Cor corZenite    = { 0.25f, 0.50f, 0.90f };
+
+static const Cor zenDia   = { 0.25f, 0.50f, 0.90f }, zenNoite = { 0.01f, 0.01f, 0.06f };
+static const Cor horDia   = { 0.53f, 0.81f, 0.92f }, horNoite = { 0.04f, 0.05f, 0.12f };
+static const Cor luzDia   = { 1.00f, 0.96f, 0.88f }, luzNoite = { 0.10f, 0.12f, 0.25f };
+static const Cor ambDia   = { 0.35f, 0.35f, 0.40f }, ambNoite = { 0.07f, 0.07f, 0.14f };
+
+/* ------------------------------------------------------------------ */
+/* Carregamento dos astros: a função carregaAstro() lê as imagens do   */
+/* sol e da lua no formato PPM e converte seus dados para RGBA.        */
+/* Uma cor específica (magenta) é utilizada como transparência,       */
+/* permitindo que apenas o desenho dos astros seja exibido, sem       */
+/* o fundo da imagem. As texturas são enviadas para a GPU e utilizam   */
+/* filtragem NEAREST para preservar a aparência pixelada do jogo.     */
+/* ------------------------------------------------------------------ */
+
+GLuint texSol, texLua;
+
+static GLuint carregaAstro(const char *nome)
+{
+    int l, a, i;
+    unsigned char *rgb = lerPPM(nome, &l, &a);
+    unsigned char *rgba;
+    GLuint tex;
+
+    if (rgb == NULL) { printf("Erro: não consegui ler %s\n", nome); exit(1); }
+
+    rgba = (unsigned char *)malloc(4 * l * a);
+    for (i = 0; i < l * a; i++) {
+        rgba[4*i]   = rgb[3*i];
+        rgba[4*i+1] = rgb[3*i+1];
+        rgba[4*i+2] = rgb[3*i+2];
+        rgba[4*i+3] = (rgb[3*i] == 255 && rgb[3*i+1] == 0 && rgb[3*i+2] == 255) ? 0 : 255;
+    }
+
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, l, a, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);   /* pixelado, como o resto */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, atlas);
+
+    free(rgb);
+    free(rgba);
+    return tex;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cálculo da posição solar e atualização da iluminação: a função    */
+/* direcaoDoSol() determina a direção da luz conforme o ângulo do sol, */
+/* considerando a inclinação do seu percurso. A função suave()       */
+/* suaviza as transições entre os valores, evitando mudanças bruscas. */
+/* Já atualizaCeuELuz() utiliza a altura do sol para interpolar as     */
+/* cores do céu, da luz ambiente e da iluminação direta. Também       */
+/* atualiza a posição da fonte de luz, a cor da neblina e a cor usada  */
+/* para limpar a tela, fazendo o ambiente acompanhar o ciclo.         */
+/* ------------------------------------------------------------------ */
+
+static void direcaoDoSol(float a, float *x, float *y, float *z)
+{
+    *x = cosf(a);
+    *y = sinf(a) * cosf(INCLINACAO_SOL);
+    *z = sinf(a) * sinf(INCLINACAO_SOL);
+}
+
+static float suave(float t)                     /* 0..1 com transição suave */
+{
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+void atualizaCeuELuz(void)
+{
+    float a = anguloSol * PI / 180.0f;
+    float altura = sinf(a);                             /* +1 meio-dia, -1 meia-noite */
+    float t = suave((altura + 0.15f) / 0.35f);          /* 0 noite, 1 dia */
+    float forca = suave(fabsf(altura) / 0.25f);         /* a luz direta some perto do horizonte */
+    float sx, sy, sz, sinal = (altura >= 0.0f) ? 1.0f : -1.0f;
+    Cor luz, amb;
+    GLfloat pos[4], dif[4], am4[4], neb[4];
+
+    direcaoDoSol(a, &sx, &sy, &sz);
+
+    corZenite    = lerp(zenNoite, zenDia, t);
+    corHorizonte = lerp(horNoite, horDia, t);
+    luz = lerp(luzNoite, luzDia, t);
+    amb = lerp(ambNoite, ambDia, t);
+
+    /* de dia a luz vem do sol; de noite, da lua (lado oposto) */
+    pos[0] = sinal * sx; pos[1] = sinal * sy; pos[2] = sinal * sz; pos[3] = 0.0f;
+    dif[0] = luz.r * forca; dif[1] = luz.g * forca; dif[2] = luz.b * forca; dif[3] = 1.0f;
+    am4[0] = amb.r; am4[1] = amb.g; am4[2] = amb.b; am4[3] = 1.0f;
+    neb[0] = corHorizonte.r; neb[1] = corHorizonte.g; neb[2] = corHorizonte.b; neb[3] = 1.0f;
+
+    glLightfv(GL_LIGHT0, GL_POSITION, pos);             /* depois do gluLookAt! */
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, dif);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, am4);
+    glFogfv(GL_FOG_COLOR, neb);                         /* neblina = cor do horizonte */
+    glClearColor(neb[0], neb[1], neb[2], 1.0f);
+}
+
+/* ------------------------------------------------------------------ */
+/* Representação dos astros: a função astro() desenha o sol ou a lua  */
+/* utilizando uma textura aplicada sobre um quadrilátero. O tamanho e */
+/* a distância do objeto são definidos pelos parâmetros da função.   */
+/* O quadrilátero é desenhado em um plano perpendicular ao eixo X,    */
+/* permitindo representar os astros no domo celeste.                 */
+/* ------------------------------------------------------------------ */
+
+static void astro(GLuint tex, float tam, float dist)
+{
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glBegin(GL_QUADS);                  /* quadrado no plano x = dist, de frente para a origem */
+    glTexCoord2f(0, 1); glVertex3f(dist, -tam, -tam);
+    glTexCoord2f(1, 1); glVertex3f(dist, -tam,  tam);
+    glTexCoord2f(1, 0); glVertex3f(dist,  tam,  tam);
+    glTexCoord2f(0, 0); glVertex3f(dist,  tam, -tam);
+    glEnd();
+}
+
+/* ------------------------------------------------------------------ */
+/* Renderização do domo celeste: a função desenhaDomo() constrói uma  */
+/* esfera celeste simplificada utilizando faixas e fatias de          */
+/* quadriláteros, com interpolação de cores entre o horizonte e o      */
+/* zênite. O domo acompanha a posição da câmera, dando a impressão de  */
+/* que o céu envolve o jogador.                                        */
+/*                                                                    */
+/* Também são desenhados o sol e a lua, posicionados conforme o       */
+/* ângulo do ciclo. A lua aparece no lado oposto ao sol, e ambos       */
+/* desaparecem parcialmente abaixo do horizonte. Para a renderização, */
+/* são ajustados temporariamente os estados de profundidade,          */
+/* iluminação, neblina, texturas e transparência.                     */
+/* ------------------------------------------------------------------ */
+
+void desenhaDomo(void)
+{
+    const int FAIXAS = 12, FATIAS = 24;
+    const float ELEV_MIN = -PI / 8.0f;      /* um pouco abaixo do horizonte */
+    float ox, oy, oz;
+    int i, j, k;
+
+    if (projecaoOrtogonal) return;          /* o domo não faz sentido na ortográfica */
+
+    posicaoDoOlho(&ox, &oy, &oz);
+
+    glPushMatrix();
+    glTranslatef(ox, oy, oz);               /* regra 1: preso à câmera */
+
+    glDepthMask(GL_FALSE);                  /* regra 2: sem profundidade */
+    glDisable(GL_LIGHTING);
+    glDisable(GL_FOG);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_CULL_FACE);
+
+    for (i = 0; i < FAIXAS; i++) {          /* uma faixa por anel de altura */
+        float e0 = ELEV_MIN + (PI / 2 - ELEV_MIN) * i / FAIXAS;
+        float e1 = ELEV_MIN + (PI / 2 - ELEV_MIN) * (i + 1) / FAIXAS;
+        float e[2];
+        e[0] = e0; e[1] = e1;
+
+        glBegin(GL_QUAD_STRIP);
+        for (j = 0; j <= FATIAS; j++) {
+            float az = 2.0f * PI * j / FATIAS;
+            for (k = 0; k < 2; k++) {
+                float u = sinf(e[k]);       /* 0 no horizonte, 1 no zênite */
+                Cor c;
+                if (u < 0.0f) u = 0.0f;
+                u = powf(u, 0.6f);          /* faixa do horizonte mais larga */
+                c = lerp(corHorizonte, corZenite, u);
+                glColor3f(c.r, c.g, c.b);
+                glVertex3f(cosf(e[k]) * cosf(az),
+                           sinf(e[k]),
+                           cosf(e[k]) * sinf(az));
+            }
+        }
+        glEnd();
+    }
+
+    /* --- sol e lua: presos ao céu, não são billboards --- */
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    if (sinf(anguloSol * PI / 180.0f) > -0.2f) {        /* some abaixo do horizonte */
+        glPushMatrix();
+        glRotatef(25.0f, 1, 0, 0);                      /* a mesma inclinação da luz */
+        glRotatef(anguloSol, 0, 0, 1);                  /* o ângulo que gira a luz */
+        astro(texSol, 0.08f, 0.9f);
+        glPopMatrix();
+    }
+    if (sinf(anguloSol * PI / 180.0f) < 0.2f) {
+        glPushMatrix();
+        glRotatef(25.0f, 1, 0, 0);
+        glRotatef(anguloSol + 180.0f, 0, 0, 1);         /* lua: lado oposto ao sol */
+        astro(texLua, 0.06f, 0.9f);
+        glPopMatrix();
+    }
+
+    glDisable(GL_BLEND);
+    glBindTexture(GL_TEXTURE_2D, atlas);
+
+    glDepthMask(GL_TRUE);                   /* devolve o estado */
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_FOG);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
 
 /* ================================================================== */
 /* ENTRADA                                                            */
@@ -1527,6 +1981,9 @@ void teclado(unsigned char tecla, int x, int y)
             break;
         case '+': case '=': mudaZoom(+1); break;    /* '=' é o + sem Shift */
         case '-': case '_': mudaZoom(-1); break;
+        case 't':
+        duracaoCiclo = (duracaoCiclo > 60.0f) ? 20.0f : 180.0f;
+        break;
     }
 }
 
@@ -1716,6 +2173,9 @@ void atualiza(void)
         glutPostRedisplay();                /* lido, para o primeiro dt depois */
         return;                             /* de fechar não ser enorme */
     }
+
+    anguloSol += (360.0f / duracaoCiclo) * dt;
+    if (anguloSol >= 360.0f) anguloSol -= 360.0f;
 
     float passo = VELOCIDADE * dt;
     float giro  = VELOCIDADE_GIRO * dt;
@@ -1907,6 +2367,8 @@ void desenhaMenu(void)
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_TEXTURE_2D);               /* painel e texto em cor sólida */
+    glDisable(GL_LIGHTING);
+    glDisable(GL_FOG);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -1956,6 +2418,8 @@ void desenhaMenu(void)
     glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_FOG);
     glPopMatrix();                                      /* modelo-visualização */
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
@@ -1985,17 +2449,21 @@ void desenha(void)
 {
     /* apaga a cor (fica o azul do glClearColor) e o buffer de
        profundidade, que guarda a distância de cada pixel */
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
     posicionaCamera();
+    atualizaCeuELuz();          /* luz e cores, depois do gluLookAt */
+    desenhaDomo();              /* primeiro, sem profundidade */
 
     /* opacos antes dos semitransparentes: a mistura precisa do que está
        atrás já no buffer, e isso inclui o personagem */
     desenhaOpacos();
+   desenhaItensCenario();
     if (modoCamera == TERCEIRA_PESSOA)
         desenhaJogador();
     desenhaTransparentes();
+  
     if (menuAberto)
         desenhaMenu();                      /* por cima de tudo */
 
@@ -2043,6 +2511,8 @@ int main(int argc, char **argv)
     printf("OpenGL %s | %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));
 
     carregaAtlas();                         /* lê o atlas e liga a textura */
+    texSol = carregaAstro("sol.ppm");
+    texLua = carregaAstro("lua.ppm");
 
     /* as teclas são lidas por estado: a repetição automática do sistema
        operacional não acrescenta nada e é desligada */
@@ -2068,6 +2538,20 @@ int main(int argc, char **argv)
     glEnable(GL_DEPTH_TEST);                /* o mais próximo cobre o mais distante,
                                                não importa a ordem de desenho */
     glEnable(GL_CULL_FACE);                 /* não desenha faces de costas */
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    glEnable(GL_NORMALIZE);
+
+    GLfloat corNeblina[4] = { 0.53f, 0.81f, 0.92f, 1.0f };  /* azul do horizonte de dia */
+
+    glEnable(GL_FOG);
+    glFogi(GL_FOG_MODE, GL_LINEAR);
+    glFogf(GL_FOG_START, 8.0f);
+    glFogf(GL_FOG_END, 26.0f);
+    glFogfv(GL_FOG_COLOR, corNeblina);
+    
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f);   /* cor de fundo: azul do céu */
 
     construirMundo();                       /* preenche a matriz, uma vez só */
