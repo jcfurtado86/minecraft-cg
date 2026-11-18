@@ -31,8 +31,14 @@ As funções centrais têm um comentário antes delas explicando o que fazem e p
 - Duas nuvens.
 - Um personagem no estilo do Minecraft, com braços e pernas que balançam ao andar.
 - Um menu de pausa (ESC) com as instruções de movimentação.
+- Um ciclo de dia e noite com sol e lua.
+- Céu dinâmico com transições de cores e iluminação.
+- Cinco blocos não-sólidos de grama.
+- Três itens distríbuidos lado a lado pelo chão.
 
-Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posições diferentes. Os blocos do terreno são texturizados com um atlas pixelado; a água e o vidro são semitransparentes. Não há iluminação: cada face recebe um brilho fixo (topo claro, laterais médias, base escura), multiplicado pela textura, o que dá a impressão de volume. As nuvens e o personagem continuam com cor sólida.
+Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posições diferentes. Os blocos do terreno são texturizados com um atlas pixelado; a água e o vidro são semitransparentes. Além dos blocos convencionais, o cenário possui elementos com formas de representação próprias. As plantas são desenhadas com dois planos texturizados cruzados, formando uma estrutura visível de diferentes ângulos. Já os itens espalhados pelo cenário são representados por planos que acompanham a orientação horizontal da câmera (billboards) e possuem uma animação de flutuação vertical.
+
+A iluminação utiliza o sistema de iluminação do OpenGL, com luz direcional e ambiente que variam conforme a posição do sol, acompanhando o ciclo de dia e noite. Durante a noite, a iluminação direta assume a direção oposta, representando a luz da lua. A cor da neblina também acompanha as mudanças atmosféricas, enquanto o céu apresenta transições graduais entre as cores do horizonte e do zênite. As nuvens e o personagem continuam com cor sólida.
 
 ## Conteúdos por aula
 
@@ -44,6 +50,7 @@ Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posi�
 | 4 | Perspectiva, correção de proporção, câmera com `gluLookAt`, navegação pelo teclado | `aplicaProjecao`, `redimensiona`, `posicionaCamera` |
 | 5 | Teclado por estado e tempo de quadro; mouse com yaw e pitch e captura do cursor; matriz do mundo e colisão por caixa alinhada aos eixos; primeira e terceira pessoa; zoom pela roda | `teclado`, `tecladoSolto`, `atualiza`, `mundo`, `posicaoLivre`, `moveJogador`, `direcaoDoOlhar`, `movimentoMouse`, `posicionaCamera`, `desenhaJogador`, `rodaMouse` |
 | Texturas e transparência | Atlas lido de um PPM e enviado com `glTexImage2D`; células por face e `glTexCoord2f`; filtro `GL_NEAREST` (visual pixelado) e `GL_MODULATE`; alfa por cor-chave; recorte com `GL_ALPHA_TEST` nas folhas; mistura com `GL_BLEND` e `glDepthMask` no vidro e na água, em três passadas, com os semitransparentes ordenados; faces ocultas por vizinho opaco | `lerPPM`, `converteRGBA`, `carregaAtlas`, `celulaDaFace`, `coordenadasDaCelula`, `desenhaBloco`, `faceVisivel`, `facesVisiveis`, `desenhaOpacos`, `listaTransparentes`, `desenhaTransparentes`, `casinhaEm` |
+| 8 | Ciclo dinâmico de dia e noite; interpolação de cores; iluminação direcional e ambiente; neblina dinâmica; domo celeste; sol e lua texturizados; animação temporal de itens (billboards); vegetação com planos cruzados | `lerp`, `suave`, `direcaoDoSol`, `atualizaCeuELuz`, `carregaAstro`, `astro`, `desenhaDomo`, `desenhaItem`, `desenhaItensCenario`, `desenhaPlanta` |
 
 ## Dependências
 
@@ -90,7 +97,7 @@ Rode o jogo **de dentro da pasta do projeto**: ele lê o `atlas.ppm` da pasta at
 
 ## Atlas de texturas
 
-Todas as faces vêm de uma única imagem, `atlas.ppm`: 64 × 64 pixels divididos em células de 16 × 16, quatro por linha. Cada célula tem um pouco de ruído pixelado, no estilo do Minecraft.
+Todas as faces vêm de uma única imagem, `atlas.ppm`: 64 × 64 pixels divididos em células de 16 × 16, quatro por linha. Cada célula tem um pouco de ruído pixelado, no estilo do Minecraft. Além do atlas de blocos, o projeto utiliza imagens no formato PPM para as texturas do sol e da lua, em `sol.ppm`e `lua.ppm`.
 
 Para mudar uma textura, edite a imagem num editor qualquer (por exemplo, salvando como PNG) e converta de volta para PPM binário com o ImageMagick:
 
@@ -127,6 +134,7 @@ O formato PPM (`P6`) não tem canal alfa. Na leitura, o jogo transforma o magent
 | P | Alternar perspectiva / ortográfica | evento |
 | ESC | Abrir / fechar o menu de pausa, com os controles | evento |
 | Q (com o menu aberto) | Sair | evento |
+| T | Acelerar velocidade do ciclo de dia e noite | evento |
 
 A coluna "Leitura" diz como cada entrada é tratada: ações contínuas, que duram enquanto a tecla está pressionada, são lidas **por estado** a cada quadro; ações discretas, que acontecem uma vez por toque, são tratadas **por evento**.
 
@@ -166,6 +174,7 @@ O acesso é `mapa[z][x]`, com a linha antes da coluna. Assim a tabela aparece no
 3. Cada bloco é gravado com `colocaBloco(tipo, x, y, z)` na matriz `mundo`.
 4. `arvoreEm`, `casinhaEm` e `nuvemEm` usam o mesmo `colocaBloco` para montar a árvore, a casinha de vidro e as nuvens.
 5. A cada quadro, a matriz é percorrida e `blocoEm(tipo, x, y, z)` é chamada para cada posição ocupada: ela desloca a origem com `glTranslatef` e desenha ali o cubo de sempre, só com as faces que nenhum vizinho opaco esconde (`facesVisiveis`).
+6. As plantas e os itens são desenhados separadamente, por `desenhaPlanta` e `desenhaItem`. As plantas usam dois planos texturizados cruzados, enquanto os itens são representados por planos que acompanham a orientação da câmera (`billboards`) e possuem uma animação de flutuação vertical.
 
 ### Desenho em três passadas
 
@@ -174,12 +183,13 @@ A mistura do vidro e da água usa a cor que já está na tela, então a ordem de
 1. **Opacos** (terra, pedra, grama, tronco, areia, neve, nuvens), em `desenhaOpacos`.
 2. **Recorte**: as folhas, com o teste de alfa ligado; os vazados são descartados. Logo depois vem o personagem.
 3. **Semitransparentes**: vidro e água, em `desenhaTransparentes`, ordenados do mais distante ao mais próximo da câmera, com a mistura ligada e a escrita de profundidade desligada.
+4. **Elementos adicionais**: as plantas são representadas por dois planos texturizados cruzados, enquanto os itens são desenhados separadamente como billboards, acompanhando a orientação horizontal da câmera e flutuando verticalmente com uma animação baseada no tempo.
 
 ### A matriz do mundo
 
-`mundo[x][y][z]` guarda o tipo de cada bloco (ou `VAZIO`) numa grade de 16 × 16 × 16. **Atenção à ordem**: o `mapa` é `[z][x]`, para parecer o mundo visto de cima, mas o `mundo` segue a ordem dos eixos, `[x][y][z]`. Todo acesso passa por `colocaBloco` e `blocoNoMundo`, que também testam os limites.
+`mundo[x][y][z]` guarda o tipo de cada bloco (ou `VAZIO`) numa grade de 16 × 16 × 16. **Atenção à ordem**: o `mapa` é `[z][x]`, para parecer o mundo visto de cima, mas o `mundo` segue a ordem dos eixos, `[x][y][z]`. Todo acesso passa por `colocaBloco` e `blocoNoMundo`, que também testam os limites. Elementos complementares, como plantas e itens, porém, não são armazenados nessa matriz nem adicionados por `colocaBloco`; eles possuem estruturas e rotinas de desenho próprias.
 
-A matriz é o que permite a colisão: a célula que contém um ponto `(px, py, pz)` é `(floor(px), floor(py), floor(pz))`, então saber se o personagem bate num bloco é consultar as poucas células que a caixa dele ocupa (`posicaoLivre`). Fora do mundo conta como sólido, e a água não é sólida.
+A matriz é o que permite a colisão: a célula que contém um ponto `(px, py, pz)` é `(floor(px), floor(py), floor(pz))`, então saber se o personagem bate num bloco é consultar as poucas células que a caixa dele ocupa (`posicaoLivre`). Fora do mundo conta como sólido, enquanto a água, as plantas e os itens não são considerados sólidos para a colisão.
 
 ## Experimente
 
