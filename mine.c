@@ -20,6 +20,17 @@
  *             mistura no vidro e na água, desenho em três passadas e
  *             remoção das faces que um vizinho opaco esconde
  *
+ *   Semana 9: gameplay. Raio da mira com percurso em grade (Amanatides e
+ *             Woo) e contorno do bloco selecionado; quebrar e colocar
+ *             blocos pelo mouse (glutMouseFunc); itens soltos que caem e
+ *             são recolhidos; gravidade, pulo e colisão vertical; inimigos
+ *             articulados que surgem à noite, perseguem, atacam e são
+ *             atacados (raio contra caixa)
+ *             Como a semana 8 (itens e ciclo de dia e noite) não está neste
+ *             repositório, a versão mínima dela também está aqui: o vetor
+ *             de itens e um relógio de dia e noite que escurece o céu e os
+ *             blocos.
+ *
  * Cenário: terreno 16 x 16 com uma montanha, uma praia e o mar,
  * uma árvore, uma casinha de vidro e duas nuvens. Tudo é feito com um
  * único cubo de lado 1, desenhado várias vezes em posições diferentes.
@@ -38,8 +49,11 @@
  *   A / D        andar para a esquerda / para a direita
  *   R            correr (segurando, junto com W, A, S, D)
  *   Setas < >    girar o olhar
- *   Espaço ou ^  subir
- *   Shift ou v   descer
+ *   Espaço       pular (só apoiado no chão)
+ *   Botão esq.   quebrar o bloco sob a mira, ou atacar um inimigo
+ *   Botão dir.   colocar o bloco escolhido, encostado na face mirada
+ *   1 a 8        escolher o tipo de bloco a colocar
+ *   N            alternar dia / noite (para a demonstração)
  *   Mouse        direção do olhar (já começa capturado)
  *   Roda ou + -  aproximar / afastar (campo de visão)
  *   Tab          liberar / capturar o cursor; clique também captura
@@ -55,6 +69,10 @@
  *
  * Compilar e rodar (Linux):
  *   gcc mine.c -o mine -lGLEW -lGL -lGLU -lglut -lm && ./mine
+ *
+ * Compilar e rodar (Windows, MinGW-w64 com freeglut e GLEW):
+ *   gcc mine.c -o mine.exe -lglew32 -lfreeglut -lopengl32 -lglu32 -lm
+ *   mine.exe
  *
  * Compilar e rodar (macOS, com a GLUT da Apple; sem roda do mouse e
  * sem Shift para descer):
@@ -85,8 +103,10 @@
 #include <stdlib.h>             /* exit */
 #include <math.h>               /* sinf, cosf, floorf, sqrtf, ceilf */
 #include <ctype.h>              /* tolower */
+#include <time.h>               /* time, para a semente do rand */
 
 #define PI 3.14159265f
+#define INFINITO 1e30f          /* "nunca": distância de um eixo paralelo ao raio */
 
 /* ------------------------------------------------------------------ */
 /* Tipos de bloco                                                     */
@@ -117,6 +137,11 @@
 #define OLHO_BRANCO 15
 #define OLHO    16
 #define VIDRO   17      /* semitransparente, da casinha de vidro */
+#define ZUMBI_PELE   18 /* cores do inimigo; ZUMBI_PELE também é o item */
+#define ZUMBI_CAMISA 19 /* que ele deixa ao morrer ("carne")            */
+#define ZUMBI_CALCA  20
+#define ZUMBI_DANO   21 /* o inimigo todo fica vermelho ao ser atingido */
+#define NUM_TIPOS    22 /* tamanho dos vetores indexados pelo tipo */
 
 /* Em que passada de desenho cada tipo entra (ver desenhaOpacos):
    opacos primeiro, depois o recorte (folhas, com vazados) e por último
@@ -230,6 +255,55 @@
 #define FOV_MIN 20.0f
 #define FOV_MAX 90.0f
 
+/* ------------------------------------------------------------------ */
+/* Semana 9: seleção, edição, física, itens, inimigos e dia e noite   */
+/* ------------------------------------------------------------------ */
+
+/* seleção e edição de blocos */
+#define ALCANCE        5.0f     /* até onde a mira alcança, em blocos */
+#define FOLGA_CONTORNO 0.003f   /* o contorno é maior que o bloco por isso,
+                                   para as linhas não brigarem com as faces
+                                   no buffer de profundidade (semana 4) */
+#define CONSOME_ITENS  0        /* 1: colocar gasta um item do tipo (precisa
+                                   tê-lo recolhido); 0: blocos ilimitados */
+
+/* início do personagem (também usado ao reaparecer) */
+#define INICIO_X 8.5f
+#define INICIO_Y 3.0f
+#define INICIO_Z 10.5f
+
+/* física: blocos e segundos */
+#define GRAVIDADE        20.0f  /* aceleração para baixo, blocos/s^2 */
+#define VELOCIDADE_PULO   7.0f  /* altura do pulo = v^2 / 2g = 1,22 bloco */
+#define VELOCIDADE_QUEDA_MAXIMA 30.0f   /* limite da queda, blocos/s */
+#define VIDA_JOGADOR     20
+#define DANO_CONTATO      2     /* vida perdida a cada contato com um inimigo */
+#define INVULNERAVEL_TEMPO 1.0f /* s sem perder vida depois de um contato */
+
+/* itens soltos */
+#define MAX_ITENS     128
+#define LADO_ITEM     0.25f     /* o item é um cubo pequeno */
+#define RAIO_COLETA   1.5f      /* distância para recolher, em blocos */
+#define ATRASO_COLETA 0.5f      /* s antes de poder recolher o item solto */
+
+/* inimigos */
+#define MAX_INIMIGOS       5
+#define LARGURA_INIMIGO    0.6f     /* a caixa é igual à do personagem */
+#define ALTURA_INIMIGO     1.8f
+#define VELOCIDADE_INIMIGO 2.5f     /* blocos por segundo */
+#define PARADA_INIMIGO     0.55f    /* distância mínima até o jogador */
+#define VIDA_INIMIGO       6
+#define DANO_ATAQUE        2        /* vida tirada por golpe do jogador */
+#define RECUO_HORIZONTAL   7.0f     /* velocidade do empurrão, blocos/s */
+#define RECUO_VERTICAL     4.5f
+#define INTERVALO_SPAWN    3.0f     /* s entre tentativas de surgir */
+#define DISTANCIA_SPAWN    6.0f     /* surgem a pelo menos isto do jogador */
+#define DESAPARECEM_DE_DIA 1        /* 1: somem ao amanhecer, sem deixar item */
+
+/* dia e noite */
+#define DURACAO_DIA 120.0f      /* s de um ciclo completo */
+#define HORA_INICIAL 0.15f      /* 0,25 é meio-dia, 0,75 meia-noite */
+
 
 /* ================================================================== */
 /* Declarações antecipadas                                            */
@@ -306,8 +380,20 @@ void construirMundo(void);
 /* posição do personagem; jogadorY é a altura dos PÉS (ver COLISÃO) */
 extern float jogadorX, jogadorY, jogadorZ;
 
+extern float velocidadeY;           /* velocidade vertical, blocos/s */
+extern int   jogadorNoChao;         /* 1 se está apoiado em um bloco */
+
+/* resultado de moveCaixa: eixos em que o movimento foi barrado */
+#define BLOQ_X     1
+#define BLOQ_Z     2
+#define BLOQ_BAIXO 4                /* desceu e achou chão */
+#define BLOQ_CIMA  8                /* subiu e bateu a cabeça */
+
 int  blocoSolido(int x, int y, int z);
+int  caixaLivre(float x, float y, float z, float largura, float altura);
 int  posicaoLivre(float x, float y, float z);
+int  moveCaixa(float *x, float *y, float *z, float largura, float altura,
+               float dx, float dy, float dz);
 void moveJogador(float dx, float dy, float dz);
 
 /*
@@ -326,6 +412,86 @@ void redimensiona(int largura, int altura);
 void direcaoDoOlhar(float *dx, float *dy, float *dz);
 void desenhaJogador(void);
 void posicionaCamera(void);
+
+/*
+ * Semana 9. Seleção do bloco sob a mira: percurso em grade, contorno e
+ * a edição do mundo (quebrar e colocar).
+ */
+typedef struct {
+    int   acertou;                  /* 1 se há bloco dentro do alcance */
+    int   x, y, z;                  /* célula sólida atingida (quebrar) */
+    int   ax, ay, az;               /* célula vazia anterior (colocar) */
+    float distancia;                /* do início do raio até a célula, em blocos */
+} Alvo;
+
+extern Alvo alvo;                   /* resultado do quadro corrente */
+extern int  inimigoMirado;          /* índice do inimigo sob a mira, ou -1 */
+extern int  tipoSelecionado;        /* tipo colocado pelo botão direito */
+
+int  blocoSelecionavel(int tipo);
+int  percursoEmGrade(float ox, float oy, float oz, float dx, float dy, float dz,
+                     float inicio, float fim, Alvo *resultado);
+void raioDaMira(float *ox, float *oy, float *oz, float *dx, float *dy, float *dz,
+                float *inicio, float *fim);
+void atualizaMira(void);
+void desenhaContorno(void);
+void quebraBloco(void);
+void colocaBlocoMirado(void);
+void cliqueEdicao(int botao);
+
+/*
+ * Semana 9. Itens soltos e a contagem recolhida de cada tipo.
+ */
+typedef struct {
+    float x, y, z;                  /* y é a base do cubo */
+    float vy;                       /* velocidade vertical */
+    float idade;                    /* s desde que apareceu */
+    int   tipo;
+} Item;
+
+extern Item itens[MAX_ITENS];
+extern int  numItens;
+extern int  contagem[NUM_TIPOS];    /* itens recolhidos, por tipo */
+
+void criaItem(int tipo, float x, float y, float z);
+void atualizaItens(float dt);
+void desenhaItens(void);
+
+/*
+ * Semana 9. Inimigos: estrutura, atualização, desenho e combate.
+ */
+typedef struct {
+    float x, y, z;                  /* pés, centro da caixa */
+    float vy;                       /* velocidade vertical */
+    float kx, kz;                   /* velocidade do recuo, decai sozinha */
+    float yaw;                      /* orientação, como a da câmera */
+    float fase, amplitude;          /* animação das pernas */
+    float ferido;                   /* s restantes de vermelho */
+    int   vida;
+} Inimigo;
+
+extern Inimigo inimigos[MAX_INIMIGOS];
+extern int     numInimigos;
+extern int     vidaJogador;
+extern float   invulnerabilidade;   /* s restantes sem levar dano */
+
+int  raioContraCaixa(float ox, float oy, float oz, float dx, float dy, float dz,
+                     const float minimo[3], const float maximo[3], float *entrada);
+int  criaInimigo(float x, float y, float z);
+void atualizaInimigo(Inimigo *e, float dt);
+void atualizaInimigos(float dt);
+void desenhaInimigo(const Inimigo *e);
+void atacaInimigo(int i);
+void reapareceJogador(void);
+
+/*
+ * Semana 9. Relógio de dia e noite.
+ */
+extern float horaDoDia;             /* de 0 a 1; 0,25 meio-dia */
+extern float luzDoDia;              /* 0,25 (noite) a 1 (dia); multiplica o brilho */
+
+void atualizaDiaNoite(float dt);
+int  ehNoite(void);
 
 /*
  * Teclado, mouse e roda, e a atualização do movimento a cada quadro.
@@ -368,6 +534,16 @@ void abreMenu(void);
 void fechaMenu(void);
 void alternaMenu(void);
 void desenhaMenu(void);             /* chamada por desenha(), depois da cena */
+
+/*
+ * Mira no centro da tela e informações provisórias no título da janela
+ * (a interface completa fica para a semana 10).
+ */
+extern int tituloSujo;              /* 1: refazer o título no próximo quadro */
+
+void desenhaMira(void);
+void atualizaTitulo(int fps);
+const char *nomeDoTipo(int tipo);
 
 
 /* ================================================================== */
@@ -834,6 +1010,10 @@ void corDaFace(int tipo, float brilho, float tom)
         case SAPATO:  r = 0.35f; g = 0.35f; b = 0.35f; break;
         case OLHO_BRANCO: r = 0.95f; g = 0.95f; b = 0.95f; break;
         case OLHO:    r = 0.30f; g = 0.25f; b = 0.65f; break;
+        case ZUMBI_PELE:   r = 0.30f; g = 0.55f; b = 0.25f; break;  /* inimigo: */
+        case ZUMBI_CAMISA: r = 0.15f; g = 0.35f; b = 0.45f; break;
+        case ZUMBI_CALCA:  r = 0.25f; g = 0.20f; b = 0.45f; break;
+        case ZUMBI_DANO:   r = 0.90f; g = 0.15f; b = 0.15f; break;
         default:     r = 1.00f; g = 0.00f; b = 1.00f; break;   /* rosa = tipo desconhecido */
     }
 
@@ -905,6 +1085,7 @@ void desenhaBloco(int tipo, float tom, int faces)
             float s[4] = { s0, s0 + lado, s0 + lado, s0 };
             float t[4] = { t0 + lado, t0 + lado, t0, t0 };
 
+            b *= luzDoDia;                  /* escurece à noite (semana 9) */
             glColor3f(b, b, b);
             for (v = 0; v < 4; v++) {
                 glTexCoord2f(s[v], t[v]);
@@ -912,7 +1093,7 @@ void desenhaBloco(int tipo, float tom, int faces)
                            verticesDaFace[f][v][2]);
             }
         } else {
-            corDaFace(tipo, brilhoDaFace[f], tom);
+            corDaFace(tipo, brilhoDaFace[f] * luzDoDia, tom);
             for (v = 0; v < 4; v++)
                 glVertex3f(verticesDaFace[f][v][0], verticesDaFace[f][v][1],
                            verticesDaFace[f][v][2]);
@@ -1176,10 +1357,17 @@ void construirMundo(void)
 /* Só moveJogador() a altera, sempre depois de testar a colisão.      */
 /* ------------------------------------------------------------------ */
 
-float jogadorX = 8.5f;  /* começa no gramado, no meio em x,        */
-float jogadorY = 3.0f;  /* com os pés sobre a grama (coluna de     */
-float jogadorZ = 10.5f; /* altura 2, chão em y = 3); com yaw 0,    */
-                        /* olha para a montanha                    */
+float jogadorX = INICIO_X;  /* começa no gramado, no meio em x,    */
+float jogadorY = INICIO_Y;  /* com os pés sobre a grama (coluna de */
+float jogadorZ = INICIO_Z;  /* altura 2, chão em y = 3); com yaw 0, */
+                            /* olha para a montanha                */
+
+/* Física vertical (semana 9). A altura deixa de ser controlada por
+   teclas: velocidadeY (blocos/s) muda com a gravidade e jogadorNoChao
+   diz se há um bloco sob os pés. Ambos são atualizados em moveJogador()
+   e lidos em atualiza(). */
+float velocidadeY = 0.0f;
+int   jogadorNoChao = 0;
 
 /* ------------------------------------------------------------------ */
 /* Uma célula impede a passagem? Fora do mundo conta como sólido      */
@@ -1210,11 +1398,13 @@ int blocoSolido(int x, int y, int z)
 
 #define FOLGA 0.001f    /* encostar não é sobrepor */
 
-int posicaoLivre(float x, float y, float z)
+/* Caixa qualquer, de largura x altura x largura, com os pés em
+   (x, y, z). Serve ao personagem, aos inimigos e aos itens. */
+int caixaLivre(float x, float y, float z, float largura, float altura)
 {
-    float meia = LARGURA_JOGADOR / 2.0f;
+    float meia = largura / 2.0f;
     int x0 = (int)floorf(x - meia), x1 = (int)floorf(x + meia - FOLGA);
-    int y0 = (int)floorf(y),        y1 = (int)floorf(y + ALTURA_JOGADOR - FOLGA);
+    int y0 = (int)floorf(y),        y1 = (int)floorf(y + altura - FOLGA);
     int z0 = (int)floorf(z - meia), z1 = (int)floorf(z + meia - FOLGA);
     int cx, cy, cz;
 
@@ -1226,35 +1416,77 @@ int posicaoLivre(float x, float y, float z)
     return 1;
 }
 
+/* A caixa do personagem */
+int posicaoLivre(float x, float y, float z)
+{
+    return caixaLivre(x, y, z, LARGURA_JOGADOR, ALTURA_JOGADOR);
+}
+
 /* ------------------------------------------------------------------ */
 /* Resposta à colisão: o movimento é testado antes de ser aplicado,   */
 /* um eixo por vez (x, z, y). Se um eixo bloqueia, os outros          */
-/* continuam, e o personagem desliza rente à parede em vez de travar  */
+/* continuam, e a caixa desliza rente à parede em vez de travar       */
 /* na diagonal.                                                       */
 /*                                                                    */
 /* Deslocamentos maiores que PASSO_MAXIMO são divididos em pedaços,   */
 /* para nenhum teste saltar por cima de uma parede (tunelamento).     */
+/*                                                                    */
+/* No eixo vertical (semana 9) o teste é o mesmo, mas a resposta diz  */
+/* mais: descendo e bloqueado, há chão sob os pés, e a caixa é        */
+/* apoiada no topo do bloco; subindo e bloqueado, a cabeça bateu no   */
+/* teto. moveCaixa devolve os eixos bloqueados (BLOQ_), e quem chama  */
+/* zera a velocidade vertical.                                        */
 /* ------------------------------------------------------------------ */
 
 /* Aplica um pedaço do deslocamento, já pequeno o bastante para não
    atravessar paredes */
-static void movePedaco(float dx, float dy, float dz)
+static int movePedaco(float *x, float *y, float *z, float largura, float altura,
+                      float dx, float dy, float dz)
 {
-    if (posicaoLivre(jogadorX + dx, jogadorY, jogadorZ)) jogadorX += dx;
-    if (posicaoLivre(jogadorX, jogadorY, jogadorZ + dz)) jogadorZ += dz;
-    if (posicaoLivre(jogadorX, jogadorY + dy, jogadorZ)) jogadorY += dy;
+    int bloqueios = 0;
+
+    if (caixaLivre(*x + dx, *y, *z, largura, altura)) *x += dx;
+    else if (dx != 0.0f) bloqueios |= BLOQ_X;
+
+    if (caixaLivre(*x, *y, *z + dz, largura, altura)) *z += dz;
+    else if (dz != 0.0f) bloqueios |= BLOQ_Z;
+
+    if (caixaLivre(*x, *y + dy, *z, largura, altura)) {
+        *y += dy;
+    } else if (dy < 0.0f) {
+        /* o passo é menor que 1 bloco, então os pés entraram só na célula
+           de y = floor(y + dy): o topo dela é o novo chão */
+        *y = floorf(*y + dy) + 1.0f;
+        bloqueios |= BLOQ_BAIXO;
+    } else if (dy > 0.0f) {
+        bloqueios |= BLOQ_CIMA;
+    }
+    return bloqueios;
 }
 
-void moveJogador(float dx, float dy, float dz)
+int moveCaixa(float *x, float *y, float *z, float largura, float altura,
+              float dx, float dy, float dz)
 {
     float comprimento = sqrtf(dx * dx + dy * dy + dz * dz);
     int pedacos = (int)ceilf(comprimento / PASSO_MAXIMO);
-    int i;
+    int bloqueios = 0, i;
 
     if (pedacos < 1) pedacos = 1;           /* parado: um pedaço nulo */
 
     for (i = 0; i < pedacos; i++)
-        movePedaco(dx / pedacos, dy / pedacos, dz / pedacos);
+        bloqueios |= movePedaco(x, y, z, largura, altura,
+                                dx / pedacos, dy / pedacos, dz / pedacos);
+    return bloqueios;
+}
+
+void moveJogador(float dx, float dy, float dz)
+{
+    int b = moveCaixa(&jogadorX, &jogadorY, &jogadorZ,
+                      LARGURA_JOGADOR, ALTURA_JOGADOR, dx, dy, dz);
+
+    jogadorNoChao = (b & BLOQ_BAIXO) != 0;
+    if (b & (BLOQ_BAIXO | BLOQ_CIMA))
+        velocidadeY = 0.0f;                 /* pisou ou bateu a cabeça */
 }
 
 
@@ -1480,6 +1712,706 @@ void posicionaCamera(void)
 
 
 /* ================================================================== */
+/* SELEÇÃO DE BLOCOS                                                  */
+/*                                                                    */
+/* Como o jogo sabe qual bloco o jogador quer quebrar: um raio parte  */
+/* da câmera na direção do olhar, e a primeira célula sólida da       */
+/* matriz ao longo dele, dentro do alcance, é a escolhida. A mira é o */
+/* centro da tela.                                                    */
+/* ================================================================== */
+
+
+Alvo alvo;                          /* calculado a cada quadro, em atualiza() */
+int  inimigoMirado = -1;
+
+/* ------------------------------------------------------------------ */
+/* Percurso em grade (Amanatides e Woo)                               */
+/* O raio é origem + t x direção, com a direção de comprimento 1, então */
+/* t é a distância em blocos. Em cada eixo o algoritmo guarda:        */
+/*   tX   o t em que o raio cruza a PRÓXIMA fronteira de célula em x  */
+/*   dX   quanto t cresce para cruzar uma célula inteira em x (1/|dx|) */
+/* (idem em y e z). A cada passo, cruza-se a fronteira mais próxima,  */
+/* a de menor t, e só aquele eixo avança: soma de dX em tX e uma      */
+/* célula a mais em x. O laço usa apenas somas e comparações, e visita */
+/* exatamente as células atravessadas, em ordem, cada uma uma vez.    */
+/*                                                                    */
+/* Devolve 1 se achou um bloco selecionável (blocoSelecionavel) com   */
+/* entrada em t entre inicio e fim. resultado recebe a célula         */
+/* atingida (a que se quebra) e a célula visitada logo antes dela, vazia */
+/* e encostada na face atingida (onde se coloca): sem calcular qual   */
+/* face foi atingida. Células fora da matriz são só atravessadas.     */
+/* ------------------------------------------------------------------ */
+
+/* A água não é alvo: o raio passa por ela, como no Minecraft */
+int blocoSelecionavel(int tipo)
+{
+    return tipo != VAZIO && tipo != AGUA;
+}
+
+int percursoEmGrade(float ox, float oy, float oz, float dx, float dy, float dz,
+                    float inicio, float fim, Alvo *resultado)
+{
+    int x = (int)floorf(ox), y = (int)floorf(oy), z = (int)floorf(oz);
+    int passoX = dx > 0.0f ? 1 : -1;
+    int passoY = dy > 0.0f ? 1 : -1;
+    int passoZ = dz > 0.0f ? 1 : -1;
+    float deltaX = dx != 0.0f ? fabsf(1.0f / dx) : INFINITO;
+    float deltaY = dy != 0.0f ? fabsf(1.0f / dy) : INFINITO;
+    float deltaZ = dz != 0.0f ? fabsf(1.0f / dz) : INFINITO;
+    /* t até a primeira fronteira: distância até a face da célula, na
+       direção em que o raio anda, dividida pela velocidade nesse eixo */
+    float tX = dx > 0.0f ? (x + 1 - ox) / dx : dx < 0.0f ? (ox - x) / -dx : INFINITO;
+    float tY = dy > 0.0f ? (y + 1 - oy) / dy : dy < 0.0f ? (oy - y) / -dy : INFINITO;
+    float tZ = dz > 0.0f ? (z + 1 - oz) / dz : dz < 0.0f ? (oz - z) / -dz : INFINITO;
+    float t;
+
+    resultado->acertou = 0;
+
+    for (;;) {
+        int ax = x, ay = y, az = z;         /* a célula de onde estamos saindo */
+
+        if (tX < tY && tX < tZ)  { t = tX; x += passoX; tX += deltaX; }
+        else if (tY < tZ)        { t = tY; y += passoY; tY += deltaY; }
+        else                     { t = tZ; z += passoZ; tZ += deltaZ; }
+
+        if (t > fim) return 0;              /* passou do alcance */
+
+        if (t >= inicio && dentroDoMundo(x, y, z) &&
+            blocoSelecionavel(mundo[x][y][z])) {
+            resultado->acertou = 1;
+            resultado->x = x;  resultado->y = y;  resultado->z = z;
+            resultado->ax = ax; resultado->ay = ay; resultado->az = az;
+            resultado->distancia = t;
+            return 1;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* O raio da mira é o que passa pelo centro da tela:                  */
+/*   primeira pessoa  sai dos olhos, na direção do olhar              */
+/*   terceira pessoa  sai da câmera, na direção do alvo do gluLookAt  */
+/*                    (a cabeça, inclinada pelo pitch), para a mira   */
+/*                    apontar para onde se vê. O trecho entre a       */
+/*                    câmera e o personagem é ignorado (inicio):      */
+/*                    o alcance conta a partir da cabeça.             */
+/* ------------------------------------------------------------------ */
+
+void raioDaMira(float *ox, float *oy, float *oz, float *dx, float *dy, float *dz,
+                float *inicio, float *fim)
+{
+    posicaoDoOlho(ox, oy, oz);
+    direcaoDoOlhar(dx, dy, dz);
+    *inicio = 0.0f;
+
+    if (modoCamera == TERCEIRA_PESSOA) {
+        float alvoX = jogadorX;
+        float alvoY = jogadorY + ALTURA_OLHOS + *dy * DISTANCIA_CAMERA;
+        float alvoZ = jogadorZ;
+        float vx = alvoX - *ox, vy = alvoY - *oy, vz = alvoZ - *oz;
+        float comprimento = sqrtf(vx * vx + vy * vy + vz * vz);
+
+        *dx = vx / comprimento;
+        *dy = vy / comprimento;
+        *dz = vz / comprimento;
+        *inicio = comprimento;
+    }
+    *fim = *inicio + ALCANCE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Seleção do quadro: o bloco sob a mira e o inimigo sob a mira. Se o */
+/* inimigo está mais perto que o bloco, é ele o alvo (ver Bloco 5).   */
+/* Chamada a cada quadro, depois que a câmera e os inimigos se        */
+/* moveram, e depois de cada edição do mundo.                         */
+/* ------------------------------------------------------------------ */
+
+void atualizaMira(void)
+{
+    float ox, oy, oz, dx, dy, dz, inicio, fim;
+    float melhor;
+    int i;
+
+    raioDaMira(&ox, &oy, &oz, &dx, &dy, &dz, &inicio, &fim);
+    percursoEmGrade(ox, oy, oz, dx, dy, dz, inicio, fim, &alvo);
+
+    inimigoMirado = -1;
+    melhor = alvo.acertou ? alvo.distancia : INFINITO;
+
+    for (i = 0; i < numInimigos; i++) {
+        const Inimigo *e = &inimigos[i];
+        float minimo[3] = { e->x - LARGURA_INIMIGO / 2.0f, e->y,
+                            e->z - LARGURA_INIMIGO / 2.0f };
+        float maximo[3] = { e->x + LARGURA_INIMIGO / 2.0f, e->y + ALTURA_INIMIGO,
+                            e->z + LARGURA_INIMIGO / 2.0f };
+        float t;
+
+        if (raioContraCaixa(ox, oy, oz, dx, dy, dz, minimo, maximo, &t) &&
+            t >= inicio && t <= fim && t < melhor) {
+            melhor = t;
+            inimigoMirado = i;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Contorno do bloco selecionado: as 12 arestas de um cubo em arame,  */
+/* pretas, com textura desligada (e sem iluminação, que este jogo não */
+/* tem). O cubo é FOLGA_CONTORNO maior que o bloco em todos os lados: */
+/* linhas exatamente sobre as faces empatariam com elas no buffer de  */
+/* profundidade e piscariam. Desenhado depois de toda a cena.         */
+/* ------------------------------------------------------------------ */
+
+static const int arestasDoCubo[12][2][3] = {
+    { {0,0,0}, {1,0,0} }, { {0,1,0}, {1,1,0} }, { {0,0,1}, {1,0,1} }, { {0,1,1}, {1,1,1} },
+    { {0,0,0}, {0,1,0} }, { {1,0,0}, {1,1,0} }, { {0,0,1}, {0,1,1} }, { {1,0,1}, {1,1,1} },
+    { {0,0,0}, {0,0,1} }, { {1,0,0}, {1,0,1} }, { {0,1,0}, {0,1,1} }, { {1,1,0}, {1,1,1} },
+};
+
+void desenhaContorno(void)
+{
+    int i;
+
+    if (!alvo.acertou || inimigoMirado >= 0) return;    /* nada a destacar */
+
+    glDisable(GL_TEXTURE_2D);
+    glLineWidth(2.0f);
+    glColor3f(0.0f, 0.0f, 0.0f);
+
+    glPushMatrix();
+    glTranslatef(alvo.x - FOLGA_CONTORNO, alvo.y - FOLGA_CONTORNO,
+                 alvo.z - FOLGA_CONTORNO);
+    glScalef(1.0f + 2.0f * FOLGA_CONTORNO, 1.0f + 2.0f * FOLGA_CONTORNO,
+             1.0f + 2.0f * FOLGA_CONTORNO);
+    glBegin(GL_LINES);
+    for (i = 0; i < 12; i++) {
+        glVertex3f((float)arestasDoCubo[i][0][0], (float)arestasDoCubo[i][0][1],
+                   (float)arestasDoCubo[i][0][2]);
+        glVertex3f((float)arestasDoCubo[i][1][0], (float)arestasDoCubo[i][1][1],
+                   (float)arestasDoCubo[i][1][2]);
+    }
+    glEnd();
+    glPopMatrix();
+
+    glEnable(GL_TEXTURE_2D);
+}
+
+
+/* ================================================================== */
+/* EDIÇÃO DO MUNDO                                                    */
+/*                                                                    */
+/* Editar o mundo é só alterar a matriz: quebrar grava VAZIO na célula */
+/* atingida, e colocar grava o tipo escolhido na célula anterior. O   */
+/* desenho, a colisão e a remoção de faces ocultas já consultam a     */
+/* matriz a cada quadro (nada é guardado antes), então refletem a     */
+/* mudança sem código extra; não há faces calculadas para refazer.    */
+/* ================================================================== */
+
+
+int tipoSelecionado = GRAMA;
+
+/* teclas 1 a 8 */
+static const int tiposColocaveis[8] = {
+    GRAMA, TERRA, PEDRA, TRONCO, FOLHA, AREIA, NEVE, VIDRO
+};
+
+/* Botão esquerdo: a célula atingida vira ar e um item do mesmo tipo
+   aparece no meio dela. Cai se não houver apoio embaixo. */
+void quebraBloco(void)
+{
+    int tipo = blocoNoMundo(alvo.x, alvo.y, alvo.z);
+
+    colocaBloco(VAZIO, alvo.x, alvo.y, alvo.z);
+    criaItem(tipo, alvo.x + 0.5f, alvo.y + 0.5f - LADO_ITEM / 2.0f, alvo.z + 0.5f);
+    atualizaMira();                         /* há outra coisa sob a mira agora */
+}
+
+/* Botão direito: o bloco escolhido vai para a célula anterior, se ela
+   estiver livre (ar ou água) e nenhuma caixa ficar presa dentro dele.
+   O teste é o da colisão: coloca, pergunta se a caixa do personagem
+   (e as dos inimigos) ainda cabe, e desfaz se não couber. */
+void colocaBlocoMirado(void)
+{
+    int tipo = tipoSelecionado;
+    int anterior, ok, i;
+
+    if (!dentroDoMundo(alvo.ax, alvo.ay, alvo.az)) return;
+    anterior = blocoNoMundo(alvo.ax, alvo.ay, alvo.az);
+    if (anterior != VAZIO && anterior != AGUA) return;
+    if (CONSOME_ITENS && contagem[tipo] <= 0) return;
+
+    colocaBloco(tipo, alvo.ax, alvo.ay, alvo.az);
+
+    ok = posicaoLivre(jogadorX, jogadorY, jogadorZ);
+    for (i = 0; i < numInimigos; i++)
+        if (!caixaLivre(inimigos[i].x, inimigos[i].y, inimigos[i].z,
+                        LARGURA_INIMIGO, ALTURA_INIMIGO))
+            ok = 0;
+    if (!ok) {                              /* prenderia alguém: desfaz */
+        colocaBloco(anterior, alvo.ax, alvo.ay, alvo.az);
+        return;
+    }
+
+    if (CONSOME_ITENS) {
+        contagem[tipo]--;
+        tituloSujo = 1;
+    }
+    atualizaMira();
+}
+
+/* Um clique, por evento (glutMouseFunc): o esquerdo ataca o inimigo sob
+   a mira, se houver (ele só é alvo se estiver mais perto que o bloco), e
+   senão quebra o bloco; o direito coloca. Usa o resultado do quadro. */
+void cliqueEdicao(int botao)
+{
+    if (botao == GLUT_LEFT_BUTTON) {
+        if (inimigoMirado >= 0)  atacaInimigo(inimigoMirado);
+        else if (alvo.acertou)   quebraBloco();
+    } else if (botao == GLUT_RIGHT_BUTTON && alvo.acertou) {
+        colocaBlocoMirado();
+    }
+}
+
+
+/* ================================================================== */
+/* ITENS                                                              */
+/*                                                                    */
+/* Quebrar um bloco solta um item: um cubo pequeno e giratório, do    */
+/* mesmo tipo, guardado no vetor itens[]. Ele cai com a mesma física  */
+/* do personagem (sem pulo) e é recolhido quando o personagem chega   */
+/* perto: sai do vetor e o contador do tipo aumenta.                  */
+/* ================================================================== */
+
+
+Item itens[MAX_ITENS];
+int  numItens = 0;
+int  contagem[NUM_TIPOS];
+
+/* x e z são o centro; y, a base do cubo */
+void criaItem(int tipo, float x, float y, float z)
+{
+    Item *it;
+
+    if (numItens >= MAX_ITENS) return;      /* vetor cheio: o item se perde */
+    it = &itens[numItens++];
+    it->x = x;  it->y = y;  it->z = z;
+    it->vy = 0.0f;
+    it->idade = 0.0f;
+    it->tipo = tipo;
+}
+
+/* Física e coleta, a cada atualização. A queda é a do Bloco 4: v recebe
+   g x dt, a posição recebe v x dt, e a colisão vertical apoia o item no
+   topo do bloco. A remoção troca o item recolhido pelo último do vetor,
+   sem deixar buraco; por isso o índice só avança quando nada é removido. */
+void atualizaItens(float dt)
+{
+    int i = 0;
+
+    while (i < numItens) {
+        Item *it = &itens[i];
+        int b, tentativas = 0;
+        float dx, dy, dz;
+
+        it->idade += dt;
+
+        /* um bloco colocado sobre o item o enterraria: sobe até sair */
+        while (!caixaLivre(it->x, it->y, it->z, LADO_ITEM, LADO_ITEM) &&
+               tentativas++ < ALTURA_MUNDO)
+            it->y += 1.0f;
+
+        it->vy -= GRAVIDADE * dt;
+        if (it->vy < -VELOCIDADE_QUEDA_MAXIMA) it->vy = -VELOCIDADE_QUEDA_MAXIMA;
+        b = moveCaixa(&it->x, &it->y, &it->z, LADO_ITEM, LADO_ITEM,
+                      0.0f, it->vy * dt, 0.0f);
+        if (b & (BLOQ_BAIXO | BLOQ_CIMA)) it->vy = 0.0f;
+
+        /* distância entre o centro do item e o do personagem */
+        dx = it->x - jogadorX;
+        dy = (it->y + LADO_ITEM / 2.0f) - (jogadorY + ALTURA_JOGADOR / 2.0f);
+        dz = it->z - jogadorZ;
+
+        if (it->idade >= ATRASO_COLETA &&
+            dx * dx + dy * dy + dz * dz < RAIO_COLETA * RAIO_COLETA) {
+            contagem[it->tipo]++;
+            tituloSujo = 1;
+            itens[i] = itens[--numItens];   /* sai do vetor; não avança i */
+        } else {
+            i++;
+        }
+    }
+}
+
+/* Cada item é o cubo de sempre (desenhaBloco), reduzido por glScalef e
+   centrado na origem, girando em torno do eixo vertical e subindo e
+   descendo de leve. O teste de alfa só descarta o vazado das folhas. */
+void desenhaItens(void)
+{
+    int i;
+
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.1f);
+
+    for (i = 0; i < numItens; i++) {
+        const Item *it = &itens[i];
+        float flutua = 0.1f + 0.05f * sinf(3.0f * it->idade);
+
+        glPushMatrix();
+        glTranslatef(it->x, it->y + LADO_ITEM / 2.0f + flutua, it->z);
+        glRotatef(90.0f * it->idade, 0.0f, 1.0f, 0.0f);
+        glScalef(LADO_ITEM, LADO_ITEM, LADO_ITEM);
+        glTranslatef(-0.5f, -0.5f, -0.5f);  /* o cubo vai de 0 a 1: centra */
+        desenhaBloco(it->tipo, 1.0f, TODAS_FACES);
+        glPopMatrix();
+    }
+
+    glDisable(GL_ALPHA_TEST);
+}
+
+
+/* ================================================================== */
+/* INIMIGOS                                                           */
+/*                                                                    */
+/* Caixas articuladas (tronco, cabeça, braços e pernas), com a mesma  */
+/* física do personagem. Perseguem o jogador, ferem por contato,      */
+/* recuam quando atingidos e, sem vida, somem deixando um item. Só    */
+/* surgem à noite.                                                    */
+/* ================================================================== */
+
+
+Inimigo inimigos[MAX_INIMIGOS];
+int     numInimigos = 0;
+int     vidaJogador = VIDA_JOGADOR;
+float   invulnerabilidade = 0.0f;
+
+/* ------------------------------------------------------------------ */
+/* Raio contra caixa alinhada aos eixos, pelo método das placas. Em   */
+/* cada eixo, o par de planos da caixa define o trecho do raio entre  */
+/* eles, de t1 a t2. O raio acerta a caixa quando os trechos dos três */
+/* eixos se sobrepõem: o maior dos começos é menor que o menor dos    */
+/* fins. Um eixo paralelo ao raio não tem trecho: ou o raio está      */
+/* dentro das duas placas (e o eixo não restringe nada), ou fora (e   */
+/* erra). entrada recebe o t em que o raio entra na caixa.            */
+/* ------------------------------------------------------------------ */
+
+int raioContraCaixa(float ox, float oy, float oz, float dx, float dy, float dz,
+                    const float minimo[3], const float maximo[3], float *entrada)
+{
+    const float origem[3]  = { ox, oy, oz };
+    const float direcao[3] = { dx, dy, dz };
+    float maiorInicio = 0.0f, menorFim = INFINITO;
+    int eixo;
+
+    for (eixo = 0; eixo < 3; eixo++) {
+        float t1, t2;
+
+        if (fabsf(direcao[eixo]) < 1e-8f) {
+            if (origem[eixo] < minimo[eixo] || origem[eixo] > maximo[eixo])
+                return 0;
+            continue;
+        }
+        t1 = (minimo[eixo] - origem[eixo]) / direcao[eixo];
+        t2 = (maximo[eixo] - origem[eixo]) / direcao[eixo];
+        if (t1 > t2) { float troca = t1; t1 = t2; t2 = troca; }
+
+        if (t1 > maiorInicio) maiorInicio = t1;
+        if (t2 < menorFim)    menorFim = t2;
+        if (maiorInicio > menorFim) return 0;       /* os trechos não se tocam */
+    }
+    *entrada = maiorInicio;
+    return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Criação e remoção. A remoção troca o inimigo pelo último do vetor. */
+/* ------------------------------------------------------------------ */
+
+int criaInimigo(float x, float y, float z)
+{
+    Inimigo *e;
+
+    if (numInimigos >= MAX_INIMIGOS) return 0;
+    e = &inimigos[numInimigos++];
+    e->x = x;  e->y = y;  e->z = z;
+    e->vy = 0.0f;  e->kx = 0.0f;  e->kz = 0.0f;
+    e->yaw = 0.0f;
+    e->fase = 0.0f;  e->amplitude = 0.0f;
+    e->ferido = 0.0f;
+    e->vida = VIDA_INIMIGO;
+    return 1;
+}
+
+static void removeInimigo(int i)
+{
+    inimigos[i] = inimigos[--numInimigos];
+}
+
+/* ------------------------------------------------------------------ */
+/* Atualização de um inimigo, com o tempo de quadro dt:               */
+/*   perseguição  vetor horizontal até o jogador, normalizado, vezes  */
+/*                velocidade e dt; para a PARADA_INIMIGO do jogador   */
+/*   orientação   yaw = atan2(dx, -dz): o inverso de direcaoDoOlhar,  */
+/*                que dá (sen yaw, -cos yaw) para o yaw da câmera     */
+/*   física       gravidade e colisão eixo a eixo, como o personagem; */
+/*                bloqueado na horizontal e apoiado, ele pula (sobe   */
+/*                degraus)                                            */
+/*   recuo        velocidade extra horizontal que decai rápido        */
+/*   animação     como a do personagem: a fase avança com a distância */
+/*                andada e a amplitude cai a zero quando ele para     */
+/* ------------------------------------------------------------------ */
+
+void atualizaInimigo(Inimigo *e, float dt)
+{
+    float dx = jogadorX - e->x, dz = jogadorZ - e->z;
+    float distancia = sqrtf(dx * dx + dz * dz);
+    float mx = 0.0f, mz = 0.0f;
+    float antesX = e->x, antesZ = e->z, andou;
+    float vx, vz;
+    int b;
+
+    if (distancia > 0.001f)
+        b = atan2f(dx, -dz) * 180.0f / PI;
+    if (distancia > PARADA_INIMIGO) {
+        mx = dx / distancia;                /* direção unitária no chão */
+        mz = dz / distancia;
+    }
+
+    vx = mx * VELOCIDADE_INIMIGO + e->kx;
+    vz = mz * VELOCIDADE_INIMIGO + e->kz;
+    e->kx -= e->kx * fminf(1.0f, 8.0f * dt);    /* o recuo se esgota */
+    e->kz -= e->kz * fminf(1.0f, 8.0f * dt);
+
+    e->vy -= GRAVIDADE * dt;
+    if (e->vy < -VELOCIDADE_QUEDA_MAXIMA) e->vy = -VELOCIDADE_QUEDA_MAXIMA;
+
+    b = moveCaixa(&e->x, &e->y, &e->z, LARGURA_INIMIGO, ALTURA_INIMIGO,
+                  vx * dt, e->vy * dt, vz * dt);
+    if (b & (BLOQ_BAIXO | BLOQ_CIMA)) e->vy = 0.0f;
+    if ((b & BLOQ_BAIXO) && (b & (BLOQ_X | BLOQ_Z)) && (mx != 0.0f || mz != 0.0f))
+        e->vy = VELOCIDADE_PULO;            /* um bloco na frente: pula */
+
+    andou = sqrtf((e->x - antesX) * (e->x - antesX) +
+                  (e->z - antesZ) * (e->z - antesZ));
+    e->fase += andou * FASE_POR_BLOCO;
+    if (andou > 0.0f) e->amplitude += VELOCIDADE_AMPLITUDE * dt;
+    else              e->amplitude -= VELOCIDADE_AMPLITUDE * dt;
+    if (e->amplitude > 1.0f) e->amplitude = 1.0f;
+    if (e->amplitude < 0.0f) e->amplitude = 0.0f;
+
+    if (e->ferido > 0.0f) e->ferido -= dt;
+}
+
+/* ------------------------------------------------------------------ */
+/* Surgimento: sobre um bloco sólido de chão (nem água, nem folha, nem */
+/* vidro, nem nuvem) onde a caixa do inimigo caiba, a pelo menos      */
+/* DISTANCIA_SPAWN do jogador, para não aparecer diante dele.         */
+/* Sorteia colunas do mapa e olha de cima para baixo.                 */
+/* ------------------------------------------------------------------ */
+
+/* y dos pés de um inimigo que surja na coluna (x, z), ou -1 */
+static int chaoParaSurgir(int x, int z)
+{
+    int y;
+
+    for (y = ALTURA_MUNDO - 1; y >= 0; y--) {
+        int tipo = mundo[x][y][z];
+
+        if (tipo == VAZIO || tipo == NUVEM) continue;
+        if (tipo == AGUA || tipo == FOLHA || tipo == TRONCO || tipo == VIDRO)
+            return -1;
+        return caixaLivre(x + 0.5f, (float)(y + 1), z + 0.5f,
+                          LARGURA_INIMIGO, ALTURA_INIMIGO) ? y + 1 : -1;
+    }
+    return -1;
+}
+
+static float tempoSurgir = INTERVALO_SPAWN;
+static float tempoSumir  = 1.0f;
+
+static void surgeEDesaparece(float dt)
+{
+    int tentativa;
+
+    if (!ehNoite()) {
+        if (DESAPARECEM_DE_DIA && numInimigos > 0) {
+            tempoSumir -= dt;               /* um por segundo, sem item */
+            if (tempoSumir <= 0.0f) {
+                removeInimigo(0);
+                tempoSumir = 1.0f;
+            }
+        }
+        return;
+    }
+
+    tempoSurgir -= dt;
+    if (tempoSurgir > 0.0f || numInimigos >= MAX_INIMIGOS) return;
+    tempoSurgir = INTERVALO_SPAWN;
+
+    for (tentativa = 0; tentativa < 20; tentativa++) {
+        int x = rand() % LADO, z = rand() % LADO;
+        float dx = x + 0.5f - jogadorX, dz = z + 0.5f - jogadorZ;
+        int y;
+
+        if (dx * dx + dz * dz < DISTANCIA_SPAWN * DISTANCIA_SPAWN) continue;
+        y = chaoParaSurgir(x, z);
+        if (y < 0) continue;
+        criaInimigo(x + 0.5f, (float)y, z + 0.5f);
+        return;
+    }
+}
+
+/* O personagem volta ao início com a vida cheia, e os inimigos somem */
+void reapareceJogador(void)
+{
+    jogadorX = INICIO_X;  jogadorY = INICIO_Y;  jogadorZ = INICIO_Z;
+    velocidadeY = 0.0f;
+    vidaJogador = VIDA_JOGADOR;
+    invulnerabilidade = 2.0f;
+    numInimigos = 0;
+    tituloSujo = 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Todos os inimigos, a cada atualização. O contato é a sobreposição  */
+/* da caixa do inimigo com a do personagem (o teste da semana 5, nos  */
+/* três eixos). Cada contato tira vida e liga uma invulnerabilidade   */
+/* curta, para a vida não cair em todos os quadros seguidos.          */
+/* ------------------------------------------------------------------ */
+
+void atualizaInimigos(float dt)
+{
+    int i;
+
+    surgeEDesaparece(dt);
+    if (invulnerabilidade > 0.0f) invulnerabilidade -= dt;
+
+    for (i = 0; i < numInimigos; i++) {
+        Inimigo *e = &inimigos[i];
+
+        atualizaInimigo(e, dt);
+
+        if (invulnerabilidade <= 0.0f &&
+            fabsf(e->x - jogadorX) < LARGURA_INIMIGO / 2.0f + LARGURA_JOGADOR / 2.0f &&
+            fabsf(e->z - jogadorZ) < LARGURA_INIMIGO / 2.0f + LARGURA_JOGADOR / 2.0f &&
+            e->y < jogadorY + ALTURA_JOGADOR && jogadorY < e->y + ALTURA_INIMIGO) {
+            vidaJogador -= DANO_CONTATO;
+            invulnerabilidade = INVULNERAVEL_TEMPO;
+            tituloSujo = 1;
+            if (vidaJogador <= 0) {
+                reapareceJogador();
+                return;                     /* o vetor foi esvaziado */
+            }
+        }
+    }
+}
+
+/* Golpe do jogador: tira vida e empurra o inimigo para longe do jogador,
+   com um saltinho. Sem vida, ele sai do vetor e deixa um item. */
+void atacaInimigo(int i)
+{
+    Inimigo *e = &inimigos[i];
+    float dx = e->x - jogadorX, dz = e->z - jogadorZ;
+    float distancia = sqrtf(dx * dx + dz * dz);
+
+    if (distancia < 0.001f) { dx = 0.0f; dz = -1.0f; distancia = 1.0f; }
+
+    e->vida -= DANO_ATAQUE;
+    e->ferido = 0.3f;
+    e->kx = dx / distancia * RECUO_HORIZONTAL;
+    e->kz = dz / distancia * RECUO_HORIZONTAL;
+    e->vy = RECUO_VERTICAL;
+
+    if (e->vida <= 0) {
+        criaItem(ZUMBI_PELE, e->x, e->y, e->z);
+        removeInimigo(i);
+        atualizaMira();                     /* o índice mirado mudou */
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Desenho hierárquico. O inimigo inteiro é levado aos pés e girado   */
+/* por -yaw, como o personagem; cada peça é posicionada em relação a  */
+/* isso, então mover o tronco move tudo. As pernas e os braços são    */
+/* desenhados por membro(): pendurados abaixo da origem, girados e    */
+/* só então levados à articulação, para girarem em torno do quadril   */
+/* e do ombro, e não do próprio centro (a ordem das transformações    */
+/* não comuta: ver membro()).                                         */
+/*                                                                    */
+/*   y 1.8   cabeça                                                   */
+/*   y 1.4   ombro: tronco e braços (estendidos para a frente)        */
+/*   y 0.7   quadril: pernas, em fases opostas                        */
+/*   y 0     pés                                                      */
+/* ------------------------------------------------------------------ */
+
+void desenhaInimigo(const Inimigo *e)
+{
+    int pele   = e->ferido > 0.0f ? ZUMBI_DANO : ZUMBI_PELE;
+    int camisa = e->ferido > 0.0f ? ZUMBI_DANO : ZUMBI_CAMISA;
+    int calca  = e->ferido > 0.0f ? ZUMBI_DANO : ZUMBI_CALCA;
+    float quadril = COMPRIMENTO_MEMBRO;
+    float ombro   = 2.0f * COMPRIMENTO_MEMBRO;
+    float angulo  = BALANCO_MAXIMO * e->amplitude * sinf(e->fase);
+
+    glPushMatrix();
+    glTranslatef(e->x, e->y, e->z);
+    glRotatef(-e->yaw, 0.0f, 1.0f, 0.0f);   /* frente do inimigo = -z local */
+
+    membro(-0.1f, quadril,  angulo, 0.18f, calca, calca, 0.1f);
+    membro( 0.1f, quadril, -angulo, 0.18f, calca, calca, 0.1f);
+
+    caixa(camisa, -0.2f, quadril, -0.1f, 0.4f, COMPRIMENTO_MEMBRO, 0.2f);
+
+    /* braços para a frente (90 graus), balançando um pouco */
+    membro(-0.26f, ombro, 90.0f + 0.3f * angulo, 0.12f, camisa, pele, 0.3f);
+    membro( 0.26f, ombro, 90.0f - 0.3f * angulo, 0.12f, camisa, pele, 0.3f);
+
+    caixa(pele, -0.2f, ombro, -0.2f, 0.4f, 0.4f, 0.4f);
+    caixa(OLHO, -0.13f, ombro + 0.2f, -0.205f, 0.1f, 0.06f, 0.01f);
+    caixa(OLHO,  0.03f, ombro + 0.2f, -0.205f, 0.1f, 0.06f, 0.01f);
+
+    glPopMatrix();
+}
+
+
+/* ================================================================== */
+/* DIA E NOITE                                                        */
+/*                                                                    */
+/* Um relógio horaDoDia de 0 a 1 dá uma volta a cada DURACAO_DIA      */
+/* segundos. A altura do sol é sen(2 pi hora): positiva de dia,       */
+/* negativa à noite. Dela saem luzDoDia, que multiplica o brilho de   */
+/* cada face (não há iluminação, só o brilho fixo por face), e a cor  */
+/* do céu, que vai do azul ao quase preto na mesma proporção.         */
+/* ================================================================== */
+
+
+float horaDoDia = HORA_INICIAL;
+float luzDoDia  = 1.0f;
+
+int ehNoite(void)
+{
+    return sinf(2.0f * PI * horaDoDia) < -0.15f;
+}
+
+void atualizaDiaNoite(float dt)
+{
+    float sol, k;
+
+    horaDoDia += dt / DURACAO_DIA;
+    if (horaDoDia >= 1.0f) horaDoDia -= 1.0f;
+
+    sol = sinf(2.0f * PI * horaDoDia);
+    luzDoDia = 0.55f + 0.6f * sol;
+    if (luzDoDia > 1.0f)  luzDoDia = 1.0f;
+    if (luzDoDia < 0.25f) luzDoDia = 0.25f;
+
+    k = (luzDoDia - 0.25f) / 0.75f;         /* 0 noite, 1 dia */
+    glClearColor(0.02f + (0.53f - 0.02f) * k,
+                 0.03f + (0.81f - 0.03f) * k,
+                 0.10f + (0.92f - 0.10f) * k, 1.0f);
+}
+
+
+/* ================================================================== */
 /* ENTRADA                                                            */
 /*                                                                    */
 /* Teclado (por evento e por estado), mouse (giro do olhar e captura do */
@@ -1527,6 +2459,14 @@ void teclado(unsigned char tecla, int x, int y)
             break;
         case '+': case '=': mudaZoom(+1); break;    /* '=' é o + sem Shift */
         case '-': case '_': mudaZoom(-1); break;
+        case 'n':                           /* pula para a noite ou para o dia */
+            horaDoDia = ehNoite() ? 0.05f : 0.60f;
+            break;
+        case '1': case '2': case '3': case '4':     /* escolhe o tipo colocado */
+        case '5': case '6': case '7': case '8':
+            tipoSelecionado = tiposColocaveis[tecla - '1'];
+            tituloSujo = 1;
+            break;
     }
 }
 
@@ -1648,12 +2588,16 @@ void alternaCaptura(void)
     else                 capturaCursor();
 }
 
-/* Clique com o cursor liberado: captura de novo */
+/* Clique, por evento: é uma ação discreta, uma vez por toque (semana 5).
+   Com o cursor liberado, o clique só captura de novo; com ele capturado,
+   quebra, ataca ou coloca (ver cliqueEdicao). */
 void cliqueMouse(int botao, int estado, int x, int y)
 {
-    (void)botao; (void)x; (void)y;
-    if (estado == GLUT_DOWN && !cursorCapturado && !menuAberto)
-        capturaCursor();
+    (void)x; (void)y;
+    if (estado != GLUT_DOWN || menuAberto) return;
+
+    if (!cursorCapturado) capturaCursor();
+    else                  cliqueEdicao(botao);
 }
 
 /* O cursor entrou na janela (por exemplo, depois de trocar de janela
@@ -1740,20 +2684,19 @@ void atualiza(void)
         mz /= comprimento;
     }
 
-    /* Shift: a GLUT original não avisa quando só o Shift é pressionado,
-       mas a freeglut (a partir da 3.0) o entrega como tecla especial,
-       GLUT_KEY_SHIFT_L ou _R, e ele entra em especiais[] como as setas */
-    int sobe  = especiais[GLUT_KEY_UP]   || teclas[' '];
-#ifdef __APPLE__
-    int desce = especiais[GLUT_KEY_DOWN];
-#else
-    int desce = especiais[GLUT_KEY_DOWN] || especiais[GLUT_KEY_SHIFT_L]
-                                         || especiais[GLUT_KEY_SHIFT_R];
-#endif
-    float subir = (float)(sobe - desce);
+    /* Física (semana 9): a altura não é mais controlada por teclas. O
+       espaço, lido por estado, só dá a velocidade inicial do pulo, e só
+       com o personagem apoiado. A cada atualização, a velocidade recebe
+       a gravidade vezes dt e a posição recebe a velocidade vezes dt (uma
+       integração numérica). A velocidade de queda é limitada. */
+    if (teclas[' '] && jogadorNoChao)
+        velocidadeY = VELOCIDADE_PULO;
+    velocidadeY -= GRAVIDADE * dt;
+    if (velocidadeY < -VELOCIDADE_QUEDA_MAXIMA)
+        velocidadeY = -VELOCIDADE_QUEDA_MAXIMA;
 
     float antesX = jogadorX, antesZ = jogadorZ;
-    moveJogador(mx * passo, subir * passo, mz * passo);
+    moveJogador(mx * passo, velocidadeY * dt, mz * passo);
 
     /* animação: quanto o personagem realmente andou no chão (a colisão
        pode ter recusado parte do movimento) */
@@ -1764,6 +2707,13 @@ void atualiza(void)
     else              amplitudeCaminhada -= VELOCIDADE_AMPLITUDE * dt;
     if (amplitudeCaminhada > 1.0f) amplitudeCaminhada = 1.0f;
     if (amplitudeCaminhada < 0.0f) amplitudeCaminhada = 0.0f;
+
+    /* o resto do mundo, depois do movimento do personagem; a mira vem por
+       último, com a câmera, os inimigos e os blocos já atualizados */
+    atualizaDiaNoite(dt);
+    atualizaInimigos(dt);
+    atualizaItens(dt);
+    atualizaMira();
 
     glutPostRedisplay();
 }
@@ -1878,10 +2828,13 @@ static const char *instrucoes[][2] = {
     { "W / S",                    "andar para frente / para trás" },
     { "A / D",                    "andar para a esquerda / para a direita" },
     { "R (segurando)",            "correr" },
-    { "Espaço ou seta para cima", "subir" },
-    { "Shift ou seta para baixo", "descer" },
+    { "Espaço",                   "pular" },
     { "Setas esquerda / direita", "girar o olhar" },
     { "Mouse",                    "olhar ao redor" },
+    { "Botão esquerdo",           "quebrar bloco / atacar" },
+    { "Botão direito",            "colocar bloco" },
+    { "1 a 8",                    "escolher o bloco a colocar" },
+    { "N",                        "alternar dia / noite" },
 };
 
 #define NUM_INSTRUCOES (int)(sizeof(instrucoes) / sizeof(instrucoes[0]))
@@ -1964,6 +2917,95 @@ void desenhaMenu(void)
 
 
 /* ================================================================== */
+/* MIRA E TÍTULO                                                      */
+/*                                                                    */
+/* Provisórios, até a interface da semana 10: uma cruz no centro da   */
+/* tela e, no título da janela, FPS, vida, bloco escolhido, itens     */
+/* recolhidos e dia ou noite.                                         */
+/* ================================================================== */
+
+
+/* Mira: o mesmo esquema 2D do menu (projeção em pixels, sem
+   profundidade), uma cruz branca com borda preta para aparecer em
+   qualquer fundo */
+void desenhaMira(void)
+{
+    float cx = larguraJanela / 2.0f, cy = alturaJanela / 2.0f;
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, larguraJanela, 0, alturaJanela);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_TEXTURE_2D);
+
+    glColor3f(0.0f, 0.0f, 0.0f);
+    retangulo(cx - 11, cy - 3, cx + 11, cy + 3);
+    retangulo(cx - 3, cy - 11, cx + 3, cy + 11);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    retangulo(cx - 9, cy - 1, cx + 9, cy + 1);
+    retangulo(cx - 1, cy - 9, cx + 1, cy + 9);
+
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_TEXTURE_2D);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+const char *nomeDoTipo(int tipo)
+{
+    switch (tipo) {
+        case GRAMA:  return "Grama";
+        case TERRA:  return "Terra";
+        case PEDRA:  return "Pedra";
+        case TRONCO: return "Tronco";
+        case FOLHA:  return "Folha";
+        case AREIA:  return "Areia";
+        case NEVE:   return "Neve";
+        case VIDRO:  return "Vidro";
+        case NUVEM:  return "Nuvem";
+        case ZUMBI_PELE: return "Carne";
+        default:     return "?";
+    }
+}
+
+int tituloSujo = 1;
+
+/* O título só é refeito a cada segundo (junto com o FPS) ou quando algo
+   que ele mostra muda (tituloSujo): ASCII puro, porque a janela do
+   sistema não usa a codificação do código-fonte */
+void atualizaTitulo(int fps)
+{
+    char titulo[256];
+    int n, tipo, algum = 0;
+
+    n = snprintf(titulo, sizeof titulo,
+                 "Minecraft | %d FPS | Vida %d | Bloco: %s | %s | Itens:",
+                 fps, vidaJogador, nomeDoTipo(tipoSelecionado),
+                 ehNoite() ? "noite" : "dia");
+
+    for (tipo = 0; tipo < NUM_TIPOS; tipo++)
+        if (contagem[tipo] > 0 && n < (int)sizeof titulo - 24) {
+            n += snprintf(titulo + n, sizeof titulo - n, " %s %d",
+                          nomeDoTipo(tipo), contagem[tipo]);
+            algum = 1;
+        }
+    if (!algum)
+        snprintf(titulo + n, sizeof titulo - n, " nenhum");
+
+    glutSetWindowTitle(titulo);
+}
+
+
+/* ================================================================== */
 /* QUADRO E PROGRAMA PRINCIPAL                                        */
 /* ================================================================== */
 
@@ -1980,6 +3022,7 @@ void desenhaMenu(void)
 
 int inicioContagem = 0;   /* início da contagem de FPS (semana 1), em ms */
 int quadros = 0;          /* quadros desenhados desde inicioContagem */
+int fps = 0;              /* quadros no último segundo, para o título */
 
 void desenha(void)
 {
@@ -1993,9 +3036,14 @@ void desenha(void)
     /* opacos antes dos semitransparentes: a mistura precisa do que está
        atrás já no buffer, e isso inclui o personagem */
     desenhaOpacos();
+    desenhaItens();
+    for (int i = 0; i < numInimigos; i++)
+        desenhaInimigo(&inimigos[i]);
     if (modoCamera == TERCEIRA_PESSOA)
         desenhaJogador();
     desenhaTransparentes();
+    desenhaContorno();                      /* depois da cena, por cima */
+    desenhaMira();
     if (menuAberto)
         desenhaMenu();                      /* por cima de tudo */
 
@@ -2003,15 +3051,18 @@ void desenha(void)
        está na tela, para não aparecer a imagem pela metade */
     glutSwapBuffers();
 
-    /* conta os quadros e, a cada 1000 ms, mostra o total no título */
+    /* conta os quadros e, a cada 1000 ms, guarda o total para o título */
     quadros++;
     int agora = glutGet(GLUT_ELAPSED_TIME);
     if (agora - inicioContagem >= 1000) {
-        char titulo[64];
-        sprintf(titulo, "Minecraft | %d FPS", quadros);
-        glutSetWindowTitle(titulo);
+        fps = quadros;
         quadros = 0;
         inicioContagem = agora;
+        tituloSujo = 1;
+    }
+    if (tituloSujo) {
+        atualizaTitulo(fps);
+        tituloSujo = 0;
     }
 }
 
@@ -2070,6 +3121,7 @@ int main(int argc, char **argv)
     glEnable(GL_CULL_FACE);                 /* não desenha faces de costas */
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f);   /* cor de fundo: azul do céu */
 
+    srand((unsigned)time(NULL));            /* onde os inimigos surgem */
     construirMundo();                       /* preenche a matriz, uma vez só */
     capturaCursor();                        /* o mouse já começa controlando o olhar */
 
