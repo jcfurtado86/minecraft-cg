@@ -13,9 +13,14 @@
  *             quadro, mouse com yaw e pitch e captura do cursor, colisão
  *             por caixa alinhada aos eixos, câmera em primeira e
  *             terceira pessoa e aproximação pela roda do mouse
- *   Texturas e transparência: atlas de texturas lido de um PPM,
- *             coordenadas de textura por face, filtro GL_NEAREST,
- *             GL_MODULATE com o brilho por face, canal alfa
+ *   Iluminação (OpenGL 1.0): luz ambiente, difusa e especular,
+ *             materiais, normais por face, normalização e Gouraud.
+ *   Demonstração: tecla I abre/fecha cubo e coluna giratórios;
+ *             teclas 1/2/3 escolhem componentes da luz, F/G escolhem
+ *             sombreamento plano/Gouraud, O alterna luz pontual/direcional.
+ *   Texturas e transparência: atlas PPM e texturas procedurais em memória,
+ *             coordenadas por face, filtro GL_NEAREST,
+ *             GL_MODULATE com iluminação por material, canal alfa
  *             com cor-chave, recorte (teste de alfa) nas folhas,
  *             mistura no vidro e na água, desenho em três passadas e
  *             remoção das faces que um vizinho opaco esconde
@@ -24,9 +29,9 @@
  * uma árvore, uma casinha de vidro e duas nuvens. Tudo é feito com um
  * único cubo de lado 1, desenhado várias vezes em posições diferentes.
  *
- * Texturas: todas as faces vêm de uma única imagem, atlas.ppm. O jogo
- * lê o arquivo da pasta atual, então precisa ser rodado da pasta do
- * projeto.
+ * Texturas: o projeto combina atlas.ppm com texturas procedurais RGBA.
+ * O atlas é lido da pasta atual, então precisa ser executado da pasta
+ * do projeto.
  *
  * Eixos do mundo:
  *   x  esquerda (0) para a direita (15)
@@ -46,7 +51,15 @@
  *   F5 ou V      alternar terceira (início) / primeira pessoa
  *   P            alternar perspectiva / ortográfica
  *   ESC          abrir / fechar o menu (pausa, instruções)
+ *   I            abrir/fechar a demonstração de iluminação
+ *   1 / 2 / 3    somente ambiente / ambiente+difusa / todas
+ *   F / G        sombreamento plano / Gouraud
+ *   O            alternar luz pontual / direcional
  *   Q            sair (com o menu aberto)
+ *
+ * Iluminação: usa o pipeline fixo clássico e GL_SEPARATE_SPECULAR_COLOR.
+ * Água e fogo usam shaders GLSL quando disponíveis; as texturas
+ * procedurais usam RGBA para permitir recorte correto nas folhas.
  *
  * Organização do arquivo, de cima para baixo:
  *   constantes, declarações antecipadas, texturas e transparência
@@ -288,6 +301,27 @@ void corDaFace(int tipo, float brilho, float tom);
 void desenhaBloco(int tipo, float tom, int faces);  /* cubo de lado 1 na origem */
 void blocoEm(int tipo, int x, int y, int z);
 
+/* Iluminação fixa (OpenGL 1.0) e demonstração isolada do Bloco 3. */
+void inicializaIluminacao(void);
+void atualizaComponentesLuz(void);
+void defineLuzDoCenario(void);
+void aplicaMaterial(int tipo);
+void desenhaDemonstracao(void);
+extern int modoDemonstracao, modoComponentesLuz, modoSombreamento;
+extern float anguloDemonstracao;
+
+/* Recursos acrescentados: texturas procedurais e shaders de agua/fogo. */
+static GLuint texturasBlocos[18] = {0};
+static GLuint programaAgua = 0, programaFogo = 0;
+static GLint tempoAguaLoc = -1, tempoFogoLoc = -1;
+static int shadersDisponiveis = 0;
+static int emissaoDemo = 0;
+static int texturaDoBloco(int tipo);
+static void inicializaTexturas(void);
+static void inicializaShaders(void);
+static void desenhaAgua(void);
+static void desenhaFogo(void);
+
 /* acesso à matriz */
 int  alturaDoTerreno(int x, int z);
 int  dentroDoMundo(int x, int y, int z);
@@ -472,7 +506,7 @@ unsigned char *converteRGBA(const unsigned char *rgb, int l, int a)
 /*   GL_NEAREST      o texel mais próximo: o visual pixelado; e sem   */
 /*                   misturar células vizinhas do atlas nas arestas   */
 /*   GL_MODULATE     cor final = textura x cor do vértice, para o     */
-/*                   brilho fixo por face continuar valendo           */
+/*                   iluminação calculada pelo pipeline fixo           */
 /* Como só existe essa textura, ela fica ativa o tempo todo: nenhum   */
 /* bloco exige troca de textura entre um desenho e outro.             */
 /* ------------------------------------------------------------------ */
@@ -727,7 +761,8 @@ int listaTransparentes(float olhoX, float olhoY, float olhoZ,
     for (x = 0; x < LADO; x++)
         for (y = 0; y < ALTURA_MUNDO; y++)
             for (z = 0; z < LADO; z++)
-                if (passadaDoBloco(mundo[x][y][z]) == PASSADA_TRANSLUCIDA) {
+                if (passadaDoBloco(mundo[x][y][z]) == PASSADA_TRANSLUCIDA &&
+                    !(mundo[x][y][z] == AGUA && shadersDisponiveis && programaAgua)) {
                     float dx = x + 0.5f - olhoX;
                     float dy = y + 0.5f - olhoY;
                     float dz = z + 0.5f - olhoZ;
@@ -802,6 +837,353 @@ void posicaoDoOlho(float *x, float *y, float *z)
 
 
 /* ================================================================== */
+/* ILUMINAÇÃO FIXA E DEMONSTRAÇÃO (BLOCOS 3 E 4)                      */
+/*                                                                    */
+/* Tudo aqui usa a API clássica do OpenGL 1.0: luzes, materiais,      */
+/* normais e glShadeModel. A posição da luz do mundo é enviada depois */
+/* de gluLookAt, portanto fica fixa no cenário, não na câmera.        */
+/* ================================================================== */
+
+int modoDemonstracao = 0;          /* 0: mundo; 1: cubo e coluna isolados */
+int modoComponentesLuz = 3;        /* 1: ambiente; 2: ambiente+difusa; 3: todas */
+int modoLuzPontual = 1;             /* 1: pontual (w=1); 0: direcional (w=0) */
+int modoSombreamento = GL_SMOOTH;  /* GL_FLAT ou GL_SMOOTH */
+float anguloDemonstracao = 0.0f;
+
+void atualizaComponentesLuz(void)
+{
+    const GLfloat ambiente[] = { 0.30f, 0.30f, 0.30f, 1.0f };
+    const GLfloat difusa[]   = { 0.90f, 0.90f, 0.90f, 1.0f };
+    const GLfloat especular[] = { 0.85f, 0.85f, 0.85f, 1.0f };
+    const GLfloat desligada[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+    glLightfv(GL_LIGHT0, GL_AMBIENT, ambiente);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,
+              modoComponentesLuz >= 2 ? difusa : desligada);
+    glLightfv(GL_LIGHT0, GL_SPECULAR,
+              modoComponentesLuz >= 3 ? especular : desligada);
+}
+
+void inicializaIluminacao(void)
+{
+    const GLfloat ambienteGlobal[] = { 0.12f, 0.12f, 0.12f, 1.0f };
+    const GLfloat especularLuz[] = { 0.85f, 0.85f, 0.85f, 1.0f };
+    const GLfloat atenuacao[] = { 1.0f, 0.015f, 0.002f };
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_NORMALIZE);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambienteGlobal);
+    glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
+#ifdef GL_LIGHT_MODEL_COLOR_CONTROL
+    /* Mantem o brilho especular separado da modulacao da textura. */
+    glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL, GL_SEPARATE_SPECULAR_COLOR);
+#else
+    fprintf(stderr, "Aviso: GL_SEPARATE_SPECULAR_COLOR nao esta disponivel nos headers.\n");
+#endif
+    glLightfv(GL_LIGHT0, GL_SPECULAR, especularLuz);
+    glLightf(GL_LIGHT0, GL_CONSTANT_ATTENUATION, atenuacao[0]);
+    glLightf(GL_LIGHT0, GL_LINEAR_ATTENUATION, atenuacao[1]);
+    glLightf(GL_LIGHT0, GL_QUADRATIC_ATTENUATION, atenuacao[2]);
+    glShadeModel(modoSombreamento);
+    atualizaComponentesLuz();
+}
+
+/* Chamada depois de posicionaCamera()/gluLookAt: a luz pertence ao mundo. */
+void defineLuzDoCenario(void)
+{
+    const GLfloat posicao[] = { 8.0f, 12.0f, 8.0f,
+                                modoLuzPontual ? 1.0f : 0.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, posicao);
+}
+
+/* Material branco difuso preserva as cores do atlas com GL_MODULATE.
+   Água e vidro recebem uma componente especular mais forte; no OpenGL
+   1.0 ela continua sendo modulada pela textura, sem separação posterior. */
+void aplicaMaterial(int tipo)
+{
+    const GLfloat ambiente[] = { 0.28f, 0.28f, 0.28f, 1.0f };
+    const GLfloat difusa[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    GLfloat especular[] = { 0.12f, 0.12f, 0.12f, 1.0f };
+    GLfloat brilho = 12.0f;
+
+    if (tipo == VIDRO) {
+        especular[0] = especular[1] = especular[2] = 0.75f;
+        brilho = 72.0f;
+    } else if (tipo == AGUA) {
+        especular[0] = 0.65f; especular[1] = 0.75f; especular[2] = 0.85f;
+        brilho = 64.0f;
+    } else if (tipo == PEDRA) {
+        especular[0] = especular[1] = especular[2] = 0.22f;
+        brilho = 18.0f;
+    } else if (tipo == NUVEM) {
+        especular[0] = especular[1] = especular[2] = 0.18f;
+        brilho = 18.0f;
+    }
+
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambiente);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, difusa);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, especular);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, brilho);
+}
+
+/* Coluna de 12 lados. Em GL_SMOOTH, a normal varia em cada vértice;
+   em GL_FLAT, cada quadrilátero recebe uma normal constante. */
+static void desenhaColunaDemonstracao(float raio, float altura, int lados)
+{
+    int i;
+    if (modoSombreamento == GL_SMOOTH) {
+        glBegin(GL_QUAD_STRIP);
+        for (i = 0; i <= lados; i++) {
+            float a = 2.0f * PI * (float)i / (float)lados;
+            float nx = cosf(a), nz = sinf(a);
+            glNormal3f(nx, 0.0f, nz);
+            glVertex3f(raio * nx, 0.0f, raio * nz);
+            glVertex3f(raio * nx, altura, raio * nz);
+        }
+        glEnd();
+    } else {
+        for (i = 0; i < lados; i++) {
+            float a0 = 2.0f * PI * (float)i / (float)lados;
+            float a1 = 2.0f * PI * (float)(i + 1) / (float)lados;
+            float am = (a0 + a1) * 0.5f;
+            glNormal3f(cosf(am), 0.0f, sinf(am));
+            glBegin(GL_QUADS);
+            glVertex3f(raio * cosf(a0), 0.0f, raio * sinf(a0));
+            glVertex3f(raio * cosf(a0), altura, raio * sinf(a0));
+            glVertex3f(raio * cosf(a1), altura, raio * sinf(a1));
+            glVertex3f(raio * cosf(a1), 0.0f, raio * sinf(a1));
+            glEnd();
+        }
+    }
+}
+
+void desenhaDemonstracao(void)
+{
+    const GLfloat especularColuna[] = { 0.90f, 0.90f, 0.90f, 1.0f };
+    const GLfloat materialAmbiente[] = { 0.22f, 0.22f, 0.22f, 1.0f };
+    const GLfloat materialDifuso[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+    const GLfloat emissaoAmarela[] = {0.75f,0.48f,0.08f,1.0f};
+    const GLfloat semEmissao[] = {0,0,0,1};
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
+    glShadeModel(modoSombreamento);
+
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emissaoDemo ? emissaoAmarela : semEmissao);
+    /* Cubo: normais constantes por face; FLAT e SMOOTH ficam iguais. */
+    glPushMatrix();
+    glTranslatef(-1.45f, 0.0f, 0.0f);
+    glTranslatef(0.0f, 0.5f, 0.0f);
+    glRotatef(anguloDemonstracao, 0.6f, 1.0f, 0.3f);
+    glTranslatef(0.0f, -0.5f, 0.0f);
+    glColor3f(0.85f, 0.38f, 0.20f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, semEmissao);
+
+    /* Coluna: normais por vértice em Gouraud, por face em FLAT. */
+    glPushMatrix();
+    glTranslatef(1.35f, 0.0f, 0.0f);
+    glTranslatef(0.0f, 1.25f, 0.0f);
+    glRotatef(anguloDemonstracao, 0.0f, 1.0f, 0.0f);
+    glTranslatef(0.0f, -1.25f, 0.0f);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, materialAmbiente);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, materialDifuso);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, especularColuna);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 72.0f);
+    glColor3f(0.20f, 0.68f, 0.82f);
+    desenhaColunaDemonstracao(0.62f, 2.5f, 12);
+    glPopMatrix();
+
+    glEnable(GL_TEXTURE_2D);
+}
+
+
+/* ================================================================== */
+/* TEXTURAS PROCEDURAIS E SHADERS GLSL                                */
+/* ================================================================== */
+
+static int texturaDoBloco(int tipo)
+{
+    switch (tipo) {
+        case GRAMA: case TERRA: case PEDRA: case TRONCO:
+        case FOLHA: case AREIA: case NEVE: case NUVEM:
+            return tipo;
+        default: return -1;
+    }
+}
+
+static void corBaseTextura(int tipo, int *r, int *g, int *b)
+{
+    switch (tipo) {
+        case GRAMA: *r=75; *g=145; *b=48; break;
+        case TERRA: *r=125; *g=78; *b=43; break;
+        case PEDRA: *r=112; *g=116; *b=122; break;
+        case TRONCO: *r=112; *g=72; *b=35; break;
+        case FOLHA: *r=45; *g=112; *b=38; break;
+        case AREIA: *r=218; *g=199; *b=135; break;
+        case NEVE: *r=225; *g=238; *b=248; break;
+        default: *r=220; *g=232; *b=240; break;
+    }
+}
+
+static void inicializaTexturas(void)
+{
+    const int tipos[] = {GRAMA,TERRA,PEDRA,TRONCO,FOLHA,AREIA,NEVE,NUVEM};
+    unsigned char pixels[16*16*4];
+    int t,x,y,k;
+    for (t=0; t<(int)(sizeof(tipos)/sizeof(tipos[0])); ++t) {
+        int tipo=tipos[t], br,bg,bb;
+        corBaseTextura(tipo,&br,&bg,&bb);
+        for (y=0; y<16; ++y) for (x=0; x<16; ++x) {
+            int variacao=((x*17+y*29+tipo*13)%23)-11;
+            if (tipo==TRONCO) variacao += ((x%4)==0 ? 18 : -3);
+            if (tipo==GRAMA && y<4) variacao += 12;
+            if (tipo==FOLHA && ((x+y)%5)==0) variacao -= 22;
+            if (tipo==PEDRA && ((x*3+y*5)%11)==0) variacao -= 18;
+            if (tipo==AREIA) variacao /= 2;
+            if (tipo==NEVE || tipo==NUVEM) variacao /= 3;
+            k=(y*16+x)*4;
+            pixels[k]=(unsigned char)fmaxf(0,fminf(255,br+variacao));
+            pixels[k+1]=(unsigned char)fmaxf(0,fminf(255,bg+variacao));
+            pixels[k+2]=(unsigned char)fmaxf(0,fminf(255,bb+variacao));
+            /* Mascara alfa irregular para os vazados da folhagem. */
+            pixels[k+3]=(unsigned char)(tipo==FOLHA &&
+                (((x*7+y*11+tipo*3)%9)==0 || ((x+y*2)%13)==0) ? 0 : 255);
+        }
+        glGenTextures(1,&texturasBlocos[tipo]);
+        glBindTexture(GL_TEXTURE_2D,texturasBlocos[tipo]);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,16,16,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+    }
+    glBindTexture(GL_TEXTURE_2D,0);
+}
+
+static GLuint compilaShader(GLenum tipo, const char *fonte)
+{
+    GLuint shader=glCreateShader(tipo);
+    GLint sucesso=GL_FALSE, tamanhoLog=0;
+    GLchar log[2048];
+    glShaderSource(shader,1,&fonte,NULL);
+    glCompileShader(shader);
+    glGetShaderiv(shader,GL_COMPILE_STATUS,&sucesso);
+    if (!sucesso) {
+        glGetShaderInfoLog(shader,sizeof(log),&tamanhoLog,log);
+        fprintf(stderr,"Erro ao compilar shader: %s\n",log);
+        glDeleteShader(shader); return 0;
+    }
+    return shader;
+}
+
+static GLuint criaPrograma(const char *vert,const char *frag)
+{
+    GLuint vs=compilaShader(GL_VERTEX_SHADER,vert);
+    GLuint fs=compilaShader(GL_FRAGMENT_SHADER,frag);
+    GLuint programa; GLint sucesso=GL_FALSE, tamanhoLog=0; GLchar log[2048];
+    if (!vs || !fs) { if(vs)glDeleteShader(vs); if(fs)glDeleteShader(fs); return 0; }
+    programa=glCreateProgram(); glAttachShader(programa,vs); glAttachShader(programa,fs);
+    glLinkProgram(programa); glGetProgramiv(programa,GL_LINK_STATUS,&sucesso);
+    if (!sucesso) {
+        glGetProgramInfoLog(programa,sizeof(log),&tamanhoLog,log);
+        fprintf(stderr,"Erro ao vincular programa: %s\n",log);
+        glDeleteProgram(programa); programa=0;
+    }
+    glDeleteShader(vs); glDeleteShader(fs); return programa;
+}
+
+static void inicializaShaders(void)
+{
+    const char *vertAgua=
+        "#version 120\n"
+        "uniform float uTempo; varying vec2 vUV; varying vec3 vNormal;\n"
+        "void main(){ vec4 p=gl_Vertex; float a=p.x*2.2+uTempo*1.5;"
+        " float b=p.z*2.8-uTempo*1.1; float o=sin(a)*0.07+cos(b)*0.05;"
+        " float dx=0.154*cos(a); float dz=-0.14*sin(b); p.y+=o;"
+        " vNormal=normalize(vec3(-dx,1.0,-dz));"
+        " gl_Position=gl_ModelViewProjectionMatrix*p; vUV=gl_MultiTexCoord0.st; }\n";
+    const char *fragAgua=
+        "#version 120\n"
+        "uniform float uTempo; varying vec2 vUV; varying vec3 vNormal;"
+        "void main(){ float b=0.5+0.5*sin(vUV.x*18.0+vUV.y*13.0+uTempo*2.0);"
+        " vec3 c=mix(vec3(0.025,0.20,0.48),vec3(0.12,0.62,0.88),b);"
+        " float d=0.45+0.55*max(dot(normalize(vNormal),normalize(vec3(0.3,0.8,0.4))),0.0);"
+        " gl_FragColor=vec4(c*d,0.62); }\n";
+    const char *vertFogo=
+        "#version 120\n varying vec2 vUV; void main(){"
+        " gl_Position=gl_ModelViewProjectionMatrix*gl_Vertex; vUV=gl_MultiTexCoord0.st; }\n";
+    const char *fragFogo=
+        "#version 120\n uniform float uTempo; varying vec2 vUV; void main(){"
+        " float s=0.08*sin(uTempo*5.0+vUV.y*8.0);"
+        " float w=(0.48*(1.0-vUV.y)+0.04)*(1.0+s);"
+        " float f=1.0-smoothstep(w*0.55,w,abs(vUV.x-0.5));"
+        " float p=0.82+0.18*sin(uTempo*8.0+vUV.y*12.0);"
+        " float a=f*(1.0-vUV.y)*p;"
+        " vec3 c=mix(vec3(1.0,0.08,0.01),vec3(1.0,0.88,0.12),1.0-vUV.y);"
+        " gl_FragColor=vec4(c,a); }\n";
+    programaAgua=criaPrograma(vertAgua,fragAgua);
+    programaFogo=criaPrograma(vertFogo,fragFogo);
+    if (programaAgua && programaFogo) {
+        tempoAguaLoc=glGetUniformLocation(programaAgua,"uTempo");
+        tempoFogoLoc=glGetUniformLocation(programaFogo,"uTempo");
+        shadersDisponiveis=1;
+        printf("Shaders de agua e fogo compilados com sucesso.\n");
+    } else fprintf(stderr,"Aviso: nao foi possivel iniciar todos os shaders.\n");
+}
+
+static void desenhaAgua(void)
+{
+    int x,y,z,i,j;
+    float tempo=glutGet(GLUT_ELAPSED_TIME)/1000.0f;
+    if (!shadersDisponiveis || !programaAgua) return;
+    glUseProgram(programaAgua); glUniform1f(tempoAguaLoc,tempo);
+    glDisable(GL_LIGHTING); glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA); glDepthMask(GL_FALSE);
+    for(x=0;x<LADO;x++) for(y=0;y<ALTURA_MUNDO;y++) for(z=0;z<LADO;z++)
+        if(mundo[x][y][z]==AGUA &&
+           (y+1>=ALTURA_MUNDO || mundo[x][y+1][z]!=AGUA)) {
+            glBegin(GL_QUADS);
+            for(i=0;i<4;i++) for(j=0;j<4;j++) {
+                float x0=x+i/4.0f,x1=x+(i+1)/4.0f;
+                float z0=z+j/4.0f,z1=z+(j+1)/4.0f;
+                glTexCoord2f(i/4.0f,j/4.0f); glVertex3f(x0,y+1,z0);
+                glTexCoord2f(i/4.0f,(j+1)/4.0f); glVertex3f(x0,y+1,z1);
+                glTexCoord2f((i+1)/4.0f,(j+1)/4.0f); glVertex3f(x1,y+1,z1);
+                glTexCoord2f((i+1)/4.0f,j/4.0f); glVertex3f(x1,y+1,z0);
+            }
+            glEnd();
+        }
+    glDepthMask(GL_TRUE); glDisable(GL_BLEND); glUseProgram(0); glEnable(GL_LIGHTING);
+}
+
+static void desenhaFogo(void)
+{
+    float tempo=glutGet(GLUT_ELAPSED_TIME)/1000.0f;
+    float x=10.5f,y=(float)alturaDoTerreno(10,10)+1.0f,z=10.5f;
+    int plano;
+    if(!shadersDisponiveis || !programaFogo) return;
+    glUseProgram(programaFogo); glUniform1f(tempoFogoLoc,tempo);
+    glDisable(GL_LIGHTING); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE);
+    glDisable(GL_CULL_FACE); glDepthMask(GL_FALSE); glColor4f(1,1,1,1);
+    glPushMatrix(); glTranslatef(x,y,z);
+    for(plano=0;plano<2;plano++) {
+        glPushMatrix(); glRotatef(plano*90.0f,0,1,0); glBegin(GL_QUADS);
+        glTexCoord2f(0,0); glVertex3f(-0.42f,0,0);
+        glTexCoord2f(1,0); glVertex3f(0.42f,0,0);
+        glTexCoord2f(1,1); glVertex3f(0.42f,1.65f,0);
+        glTexCoord2f(0,1); glVertex3f(-0.42f,1.65f,0);
+        glEnd(); glPopMatrix();
+    }
+    glPopMatrix(); glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE); glUseProgram(0); glEnable(GL_LIGHTING);
+}
+
+/* ================================================================== */
 /* MUNDO                                                              */
 /*                                                                    */
 /* O cenário: cores e desenho dos blocos, o mapa de alturas, a matriz */
@@ -815,10 +1197,10 @@ void posicaoDoOlho(float *x, float *y, float *z)
 /* Cores sólidas: só para o que não tem textura (nuvem e as partes do */
 /* personagem). Escolhe a cor de UMA face a partir de:                */
 /*   tipo    qual peça é, define a cor base                           */
-/*   brilho  quanto clarear ou escurecer a face (ver desenhaBloco)    */
+/*   brilho  parâmetro mantido por compatibilidade com a função antiga */
 /*   tom     pequena variação entre blocos vizinhos (xadrez), para    */
 /*           dar para enxergar os blocos de uma nuvem                 */
-/* A cor final é a cor base multiplicada por brilho e tom.            */
+/* A iluminação real substitui o antigo brilho manual por face.       */
 /* ------------------------------------------------------------------ */
 
 void corDaFace(int tipo, float brilho, float tom)
@@ -837,7 +1219,8 @@ void corDaFace(int tipo, float brilho, float tom)
         default:     r = 1.00f; g = 0.00f; b = 1.00f; break;   /* rosa = tipo desconhecido */
     }
 
-    glColor3f(r * brilho * tom, g * brilho * tom, b * brilho * tom);
+    (void)brilho; /* a iluminação real substitui o brilho manual por face */
+    glColor3f(r * tom, g * tom, b * tom);
 }
 
 /* ------------------------------------------------------------------ */
@@ -852,16 +1235,14 @@ void corDaFace(int tipo, float brilho, float tom)
 /* faces diz quais faces desenhar (soma de bits FACE_): blocoEm()     */
 /* pula as que um vizinho esconde; o personagem pede TODAS_FACES.     */
 /*                                                                    */
-/* Brilho: ainda não há iluminação, então cada face recebe            */
-/* um brilho fixo: topo claro, laterais médias, base escura. Isso dá  */
-/* a impressão de volume.                                             */
+/* Iluminação: cada face informa sua normal geométrica. O pipeline    */
+/* fixo calcula a intensidade a partir da normal e da fonte de luz.   */
 /*                                                                    */
 /* Textura: antes de cada glVertex3f vai um glTexCoord2f, com o canto */
 /* correspondente da célula da face. A coordenada de textura é estado */
 /* corrente aplicado ao próximo vértice, como a cor. Com GL_MODULATE, */
-/* cor final = texel x cor do vértice; por isso a cor do vértice é um */
-/* cinza do brilho da face, e o texel verde de uma lateral sai mais   */
-/* escuro que o do topo, como antes com as cores sólidas.             */
+/* cor final = texel x cor iluminada do vértice. O vértice recebe    */
+/* branco para preservar a cor original do atlas sob a iluminação.   */
 /* A primeira linha do arquivo de imagem corresponde a t = 0, então o */
 /* alto da célula é t0 e o pé é t0 + lado: invertido em relação ao y  */
 /* da face (t' = 1 - t). Sem isso a grama ficaria embaixo da lateral. */
@@ -871,7 +1252,14 @@ static const int bitDaFace[6] = {
     FACE_FRENTE, FACE_TRAS, FACE_DIREITA, FACE_ESQUERDA, FACE_TOPO, FACE_BASE
 };
 
-static const float brilhoDaFace[6] = { 0.80f, 0.80f, 0.65f, 0.65f, 1.00f, 0.50f };
+static const float normaisDaFace[6][3] = {
+    { 0.0f, 0.0f, 1.0f },   /* frente */
+    { 0.0f, 0.0f,-1.0f },   /* trás */
+    { 1.0f, 0.0f, 0.0f },   /* direita */
+    {-1.0f, 0.0f, 0.0f },   /* esquerda */
+    { 0.0f, 1.0f, 0.0f },   /* topo */
+    { 0.0f,-1.0f, 0.0f }    /* base */
+};
 
 static const float verticesDaFace[6][4][3] = {
     { {0,0,1}, {1,0,1}, {1,1,1}, {0,1,1} },     /* frente (z = 1) */
@@ -884,35 +1272,46 @@ static const float verticesDaFace[6][4][3] = {
 
 void desenhaBloco(int tipo, float tom, int faces)
 {
-    int texturizado = celulaDaFace(tipo, FACE_TOPO) != SEM_TEXTURA;
+    int tipoProcedural = texturaDoBloco(tipo);
+    int texturizado = (tipoProcedural >= 0) ||
+                      (celulaDaFace(tipo, FACE_TOPO) != SEM_TEXTURA);
     int f, v;
 
-    /* ligar e desligar a textura é proibido entre glBegin e glEnd */
-    if (texturizado) glEnable(GL_TEXTURE_2D);
-    else             glDisable(GL_TEXTURE_2D);
+    aplicaMaterial(tipo);
+    if (tipoProcedural >= 0) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texturasBlocos[tipoProcedural]);
+    } else if (texturizado) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, atlas);
+    } else glDisable(GL_TEXTURE_2D);
 
     glBegin(GL_QUADS);
     for (f = 0; f < 6; f++) {
         if (!(faces & bitDaFace[f])) continue;
 
+        /* A normal é estado corrente e vale para os quatro vértices. */
+        glNormal3f(normaisDaFace[f][0], normaisDaFace[f][1],
+                   normaisDaFace[f][2]);
+
         if (texturizado) {
-            float s0, t0, lado;
-            float b = brilhoDaFace[f];
-
-            coordenadasDaCelula(celulaDaFace(tipo, bitDaFace[f]), &s0, &t0, &lado);
-            /* s e t de cada canto, na ordem dos vértices da tabela:
-               baixo-esquerda, baixo-direita, cima-direita, cima-esquerda */
-            float s[4] = { s0, s0 + lado, s0 + lado, s0 };
-            float t[4] = { t0 + lado, t0 + lado, t0, t0 };
-
-            glColor3f(b, b, b);
+            float s[4], t[4];
+            if (tipoProcedural >= 0) {
+                s[0]=0; s[1]=1; s[2]=1; s[3]=0;
+                t[0]=1; t[1]=1; t[2]=0; t[3]=0;
+            } else {
+                float s0, t0, lado;
+                coordenadasDaCelula(celulaDaFace(tipo, bitDaFace[f]), &s0, &t0, &lado);
+                s[0]=s0; s[1]=s0+lado; s[2]=s0+lado; s[3]=s0;
+                t[0]=t0+lado; t[1]=t0+lado; t[2]=t0; t[3]=t0;
+            }
+            glColor3f(1.0f, 1.0f, 1.0f);
             for (v = 0; v < 4; v++) {
                 glTexCoord2f(s[v], t[v]);
-                glVertex3f(verticesDaFace[f][v][0], verticesDaFace[f][v][1],
-                           verticesDaFace[f][v][2]);
+                glVertex3f(verticesDaFace[f][v][0], verticesDaFace[f][v][1], verticesDaFace[f][v][2]);
             }
         } else {
-            corDaFace(tipo, brilhoDaFace[f], tom);
+            corDaFace(tipo, 1.0f, tom);
             for (v = 0; v < 4; v++)
                 glVertex3f(verticesDaFace[f][v][0], verticesDaFace[f][v][1],
                            verticesDaFace[f][v][2]);
@@ -1521,6 +1920,27 @@ void teclado(unsigned char tecla, int x, int y)
             projecaoOrtogonal = !projecaoOrtogonal;
             aplicaProjecao();
             break;
+        case 'i':
+            modoDemonstracao = !modoDemonstracao;
+            break;
+        case '1': case '2': case '3':
+            modoComponentesLuz = tecla - '0';
+            atualizaComponentesLuz();
+            break;
+        case 'o':
+            modoLuzPontual = !modoLuzPontual;
+            break;
+        case 'e':
+            emissaoDemo = !emissaoDemo;
+            break;
+        case 'f':
+            modoSombreamento = GL_FLAT;
+            glShadeModel(modoSombreamento);
+            break;
+        case 'g':
+            modoSombreamento = GL_SMOOTH;
+            glShadeModel(modoSombreamento);
+            break;
         case 'v':
             modoCamera = (modoCamera == PRIMEIRA_PESSOA) ? TERCEIRA_PESSOA
                                                          : PRIMEIRA_PESSOA;
@@ -1717,6 +2137,13 @@ void atualiza(void)
         return;                             /* de fechar não ser enorme */
     }
 
+    if (modoDemonstracao) {
+        anguloDemonstracao += 35.0f * dt;
+        if (anguloDemonstracao >= 360.0f) anguloDemonstracao -= 360.0f;
+        glutPostRedisplay();
+        return;
+    }
+
     float passo = VELOCIDADE * dt;
     float giro  = VELOCIDADE_GIRO * dt;
     if (teclas['r']) passo *= FATOR_CORRIDA;    /* correr */
@@ -1882,6 +2309,12 @@ static const char *instrucoes[][2] = {
     { "Shift ou seta para baixo", "descer" },
     { "Setas esquerda / direita", "girar o olhar" },
     { "Mouse",                    "olhar ao redor" },
+    { "I",                        "demonstração de iluminação" },
+    { "1 / 2 / 3",                "componentes da luz" },
+    { "F / G",                    "sombreamento plano / Gouraud" },
+    { "O",                        "luz pontual / direcional" },
+    { "E",                        "alternar emissao luminosa do cubo" },
+    { "Agua e fogo",               "efeitos animados por shaders GLSL" },
 };
 
 #define NUM_INSTRUCOES (int)(sizeof(instrucoes) / sizeof(instrucoes[0]))
@@ -1906,6 +2339,7 @@ void desenhaMenu(void)
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    glDisable(GL_LIGHTING);                 /* painel e texto não recebem luz */
     glDisable(GL_TEXTURE_2D);               /* painel e texto em cor sólida */
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1956,6 +2390,7 @@ void desenhaMenu(void)
     glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
     glPopMatrix();                                      /* modelo-visualização */
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
@@ -1983,27 +2418,45 @@ int quadros = 0;          /* quadros desenhados desde inicioContagem */
 
 void desenha(void)
 {
-    /* apaga a cor (fica o azul do glClearColor) e o buffer de
-       profundidade, que guarda a distância de cada pixel */
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
+    glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    posicionaCamera();
 
-    /* opacos antes dos semitransparentes: a mistura precisa do que está
-       atrás já no buffer, e isso inclui o personagem */
-    desenhaOpacos();
-    if (modoCamera == TERCEIRA_PESSOA)
-        desenhaJogador();
-    desenhaTransparentes();
+    if (modoDemonstracao) {
+        /* A demonstração usa uma câmera própria, sem alterar a câmera do jogo. */
+        glMatrixMode(GL_PROJECTION);
+        glPushMatrix();
+        glLoadIdentity();
+        gluPerspective(50.0, (double)larguraJanela / (double)alturaJanela,
+                       0.1, 100.0);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+        gluLookAt(0.0, 2.8, 8.0, 0.0, 1.2, 0.0, 0.0, 1.0, 0.0);
+        {
+            const GLfloat posicaoDemo[] = { -3.0f, 6.0f, 5.0f,
+                                             modoLuzPontual ? 1.0f : 0.0f };
+            glLightfv(GL_LIGHT0, GL_POSITION, posicaoDemo);
+        }
+        desenhaDemonstracao();
+        glMatrixMode(GL_PROJECTION);
+        glPopMatrix();
+        glMatrixMode(GL_MODELVIEW);
+    } else {
+        posicionaCamera();
+        defineLuzDoCenario();              /* depois de gluLookAt: luz fixa no mundo */
+        desenhaOpacos();
+        if (modoCamera == TERCEIRA_PESSOA)
+            desenhaJogador();
+        desenhaTransparentes();
+        desenhaAgua();
+        desenhaFogo();
+    }
+
     if (menuAberto)
-        desenhaMenu();                      /* por cima de tudo */
+        desenhaMenu();
 
-    /* desenhamos num buffer escondido; aqui ele troca de lugar com o que
-       está na tela, para não aparecer a imagem pela metade */
     glutSwapBuffers();
 
-    /* conta os quadros e, a cada 1000 ms, mostra o total no título */
     quadros++;
     int agora = glutGet(GLUT_ELAPSED_TIME);
     if (agora - inicioContagem >= 1000) {
@@ -2043,6 +2496,9 @@ int main(int argc, char **argv)
     printf("OpenGL %s | %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));
 
     carregaAtlas();                         /* lê o atlas e liga a textura */
+    inicializaTexturas();                   /* texturas procedurais em memória */
+    inicializaIluminacao();                 /* pipeline fixo do OpenGL 1.0 */
+    inicializaShaders();                    /* água e fogo animados em GLSL */
 
     /* as teclas são lidas por estado: a repetição automática do sistema
        operacional não acrescenta nada e é desligada */
