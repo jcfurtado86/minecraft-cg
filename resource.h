@@ -1,0 +1,6 @@
+#ifndef MINECRAFT_RESOURCE_H
+#define MINECRAFT_RESOURCE_H
+
+#define IDI_MINECRAFT 101
+
+#endif
