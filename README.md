@@ -1,8 +1,8 @@
 # minecraft-cg
 
-![Demonstração: o personagem passa pela casinha de vidro, olha as folhas da árvore em primeira pessoa, atravessa o lago e a câmera volta a mostrar a ilha](midia/demo.webp)
+![Demonstração: menu principal, o personagem recolhe itens, quebra blocos e monta uma torre de pedra pela barra de itens, pula, enfrenta zumbis à noite sob a lâmpada, a demonstração de iluminação e o menu de pausa](midia/demo.webp)
 
-Um cenário no estilo Minecraft feito em C com OpenGL no pipeline fixo, como material da disciplina de Computação Gráfica.
+Um jogo no estilo Minecraft feito em C com OpenGL, como material da disciplina de Computação Gráfica. Quase tudo usa o pipeline fixo; só a água e a fogueira usam shaders GLSL.
 
 O código inteiro está em um único arquivo, [`mine.c`](mine.c), comentado para ser lido do começo ao fim. Ele é organizado em seções, nesta ordem:
 
@@ -227,6 +227,8 @@ A matriz é o que permite a colisão: a célula que contém um ponto `(px, py, p
 - **Quebrar um bloco**: `colocaBloco(VAZIO, x, y, z)` depois de `construirMundo`; o desenho e a colisão passam a ver o buraco. No jogo, o botão esquerdo faz exatamente isso.
 
 ## Demonstrações dos erros da Semana 10
+
+O roteiro completo, com o que observar em cada uma, está em [`demonstracao/README.md`](demonstracao/README.md).
 
 As quatro demonstrações são modos temporários de compilação. Sem nenhuma macro, o código permanece na versão correta. Execute os comandos a partir da pasta do projeto, onde está o `atlas.ppm`.
 
