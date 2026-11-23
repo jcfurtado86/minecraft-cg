@@ -992,7 +992,8 @@ void casinhaEm(int x, int z)
 /* Ao final, os estados gráficos utilizados são restaurados.           */
 /* ------------------------------------------------------------------ */
 
-/* Desenha um item como uma imagem que acompanha a direção da câmera */
+/* Desenha um item como uma imagem que acompanha a direção da câmera.
+   Liga o teste de alfa, e quem chama (desenhaItens) o desliga no fim. */
 void desenhaItem(int celula)
 {
     float s0, t0, lado;
@@ -1025,7 +1026,6 @@ void desenhaItem(int celula)
             glTexCoord2f(s0, t0);
             glVertex3f(-largura, 0.7f, 0.0f);
         glEnd();
-        glDisable(GL_ALPHA_TEST);
     }
     else {
         /* Maçã provisória: um desenho vermelho */
@@ -1041,7 +1041,6 @@ void desenhaItem(int celula)
             glVertex3f(largura, 0.7f, 0.0f);
             glVertex3f(-largura, 0.7f, 0.0f);
         glEnd();
-        glDisable(GL_ALPHA_TEST);
     }
 
     glPopMatrix();
@@ -1110,8 +1109,9 @@ void desenhaPlanta(int x, int y, int z)
 
     glPopMatrix();
 
-    /* Restaura os estados usados pelo restante do cenário */
-    glDisable(GL_ALPHA_TEST);
+    /* Restaura o descarte de faces. O teste de alfa continua ligado: a
+       planta é desenhada no meio da passada de recorte, e desligá-lo aqui
+       deixaria sem os vazados as folhas desenhadas depois dela */
     glEnable(GL_CULL_FACE);
 }
 
@@ -4062,24 +4062,37 @@ static void desenhaIconeBloco3D(int tipo, float x, float y, float lado)
     glPopMatrix();
 }
 
-static void desenhaBarraItens(void)
+#define LADO_ESPACO_BARRA 58.0f     /* lado de cada espaço da barra, em pixels */
+
+/* Canto inferior esquerdo e tamanho do painel da barra de itens. Os
+   corações da vida usam a mesma conta, para ficarem logo acima dela. */
+static void limitesBarraItens(float *x0, float *y0, float *largura, float *altura)
 {
-    float lado = 58.0f, espaco = 6.0f;
-    float largura = NUM_ITENS * lado + (NUM_ITENS - 1) * espaco + 24.0f;
+    float espaco = 6.0f;
+    *largura = NUM_ITENS * LADO_ESPACO_BARRA + (NUM_ITENS - 1) * espaco + 24.0f;
+    *altura  = LADO_ESPACO_BARRA + 24.0f;
 #if DEMO_UI_FIXED_BAR
     /* Defeito intencional: a barra fica presa à posição da janela inicial. */
-    float x0 = DEMO_UI_FIXED_BAR_X;
+    *x0 = DEMO_UI_FIXED_BAR_X;
 #else
-    float x0 = (larguraJanela - largura) / 2.0f;
+    *x0 = (larguraJanela - *largura) / 2.0f;
 #endif
-    float y0 = 18.0f;
+    *y0 = 18.0f;
+}
+
+static void desenhaBarraItens(void)
+{
+    float lado = LADO_ESPACO_BARRA, espaco = 6.0f;
+    float largura, alturaPainel, x0, y0;
     int i;
+
+    limitesBarraItens(&x0, &y0, &largura, &alturaPainel);
 
     glDisable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glColor4f(0.02f, 0.02f, 0.03f, 0.80f);
-    retangulo(x0, y0, x0 + largura, y0 + lado + 24.0f);
+    retangulo(x0, y0, x0 + largura, y0 + alturaPainel);
     glDisable(GL_BLEND);
 
     /* Limpa somente a profundidade para os cubos da interface nao serem
@@ -4103,6 +4116,74 @@ static void desenhaBarraItens(void)
           escreve(FONTE, textoX + 1.0f, textoY - 1.0f, quantidade);
           glColor3f(1.0f, 1.0f, 1.0f);
           escreve(FONTE, textoX, textoY, quantidade); }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Corações da vida, como no Minecraft: dez corações logo acima da    */
+/* barra, à esquerda, cada um valendo 2 pontos de VIDA_JOGADOR (20).  */
+/* Com vida ímpar, o último aparece pela metade. Cada coração é um    */
+/* desenho de 9 x 8 pixels, feito de quadradinhos (retangulo), com    */
+/* contorno, preenchimento e um brilho:                               */
+/*   K contorno   R vermelho   W brilho   . transparente              */
+/* A linha 0 é a de cima. Logo depois de um dano (invulnerabilidade), */
+/* o contorno pisca em branco.                                        */
+/* ------------------------------------------------------------------ */
+
+static const char *desenhoCoracao[8] = {
+    ".KK...KK.",
+    "KRRK.KRRK",
+    "KRWRKRRRK",
+    "KRRRRRRRK",
+    ".KRRRRRK.",
+    "..KRRRK..",
+    "...KRK...",
+    "....K....",
+};
+
+#define PIXEL_CORACAO 2.5f          /* tamanho de cada quadradinho, em pixels */
+
+/* cheio: 2, meio: 1, vazio: 0; (x, y) é o canto inferior esquerdo */
+static void desenhaCoracao(float x, float y, int cheio, int pisca)
+{
+    int linha, coluna;
+
+    for (linha = 0; linha < 8; linha++)
+        for (coluna = 0; coluna < 9; coluna++) {
+            char c = desenhoCoracao[linha][coluna];
+            float px = x + coluna * PIXEL_CORACAO;
+            float py = y + (7 - linha) * PIXEL_CORACAO;   /* linha 0 fica em cima */
+            int preenchido = cheio == 2 || (cheio == 1 && coluna <= 4);
+
+            if (c == '.') continue;
+            if (c == 'K') {
+                if (pisca) glColor3f(1.0f, 1.0f, 1.0f);
+                else       glColor3f(0.0f, 0.0f, 0.0f);
+            } else if (!preenchido) {
+                glColor3f(0.22f, 0.22f, 0.22f);           /* parte vazia */
+            } else if (c == 'W') {
+                glColor3f(1.0f, 0.75f, 0.75f);            /* brilho */
+            } else {
+                glColor3f(0.85f, 0.08f, 0.08f);
+            }
+            retangulo(px, py, px + PIXEL_CORACAO, py + PIXEL_CORACAO);
+        }
+}
+
+static void desenhaCoracoes(void)
+{
+    float x0, y0, largura, altura;
+    int pisca = invulnerabilidade > 0.0f && (int)(invulnerabilidade * 8.0f) % 2 == 0;
+    int i;
+
+    limitesBarraItens(&x0, &y0, &largura, &altura);
+    glDisable(GL_TEXTURE_2D);
+
+    for (i = 0; i < VIDA_JOGADOR / 2; i++) {
+        int resto = vidaJogador - 2 * i;              /* vida que sobra para este */
+        int cheio = resto >= 2 ? 2 : (resto == 1 ? 1 : 0);
+        desenhaCoracao(x0 + 4.0f + i * 10.0f * PIXEL_CORACAO,
+                       y0 + altura + 6.0f, cheio, pisca);
     }
 }
 
@@ -4185,6 +4266,7 @@ void desenhaInterface(void)
     if (estadoJogo == ESTADO_JOGANDO) {
         desenhaMira();
         desenhaBarraItens();
+        desenhaCoracoes();
         desenhaInformacoes();
         return;
     }

@@ -1,6 +1,6 @@
 # minecraft-cg
 
-![Demonstração: menu principal, o personagem recolhe itens, quebra blocos e monta uma torre de pedra pela barra de itens, pula, enfrenta zumbis à noite sob a lâmpada, a demonstração de iluminação e o menu de pausa](midia/demo-jogo-integrado.webp)
+![Demonstração: menu principal, o personagem recolhe itens, quebra blocos e monta uma torre de pedra pela barra de itens, pula, enfrenta zumbis à noite sob a lâmpada, perdendo corações de vida, e abre o menu de pausa](midia/demo-coracoes.webp)
 
 Um jogo no estilo Minecraft feito em C com OpenGL, como material da disciplina de Computação Gráfica. Quase tudo usa o pipeline fixo; só a água e a fogueira usam shaders GLSL.
 
@@ -44,6 +44,7 @@ As funções centrais têm um comentário antes delas explicando o que fazem e p
 - Um menu principal com os botões Jogar e Sair.
 - Um menu de pausa (ESC) com os botões Continuar, Instruções e Sair.
 - Uma mira no centro, uma barra de nove blocos com miniaturas 3D e a quantidade recolhida de cada um.
+- Dez corações de vida acima da barra, como no Minecraft, com meio coração e contorno que pisca ao levar dano.
 - Informações em tela: FPS, vida, dia ou noite e posição do personagem.
 
 Tudo é feito com **um único cubo de lado 1**, desenhado várias vezes em posições diferentes. Os blocos do terreno são texturizados com um atlas pixelado; a água e o vidro são semitransparentes. Além dos blocos convencionais, o cenário possui elementos com formas de representação próprias. As plantas são desenhadas com dois planos texturizados cruzados, formando uma estrutura visível de diferentes ângulos. Os itens soltos no chão giram e flutuam: os que são blocos aparecem como cubos pequenos, e a muda e a maçã, como planos que acompanham a orientação horizontal da câmera (billboards).
@@ -63,7 +64,7 @@ A iluminação utiliza o sistema de iluminação do OpenGL, com luz direcional e
 | 8 | Ciclo de dia e noite; interpolação de cores; iluminação direcional e ambiente; neblina dinâmica; domo celeste; sol e lua texturizados; itens como imagens que acompanham a câmera (billboards); vegetação com planos cruzados | `lerp`, `suave`, `direcaoDoSol`, `atualizaCeuELuz`, `carregaAstro`, `astro`, `desenhaDomo`, `desenhaItem`, `desenhaPlanta` |
 | 9 | Seleção de blocos por percurso em grade (Amanatides e Woo) e contorno; quebrar e colocar blocos; itens soltos que caem e são recolhidos; gravidade, pulo e colisão vertical; inimigos que surgem à noite, perseguem, causam dano e são atacados (raio contra caixa) | `percursoEmGrade`, `atualizaMira`, `desenhaContorno`, `quebraBloco`, `colocaBlocoMirado`, `criaItem`, `atualizaItens`, `desenhaItens`, `moveCaixa`, `raioContraCaixa`, `atualizaInimigos`, `desenhaInimigo`, `ehNoite` |
 | Iluminação e shaders | Componentes ambiente, difusa e especular; materiais foscos e polidos; normais por face e `GL_NORMALIZE`; sombreamento plano e Gouraud; luz pontual e direcional; demonstração isolada; texturas procedurais; água e fogo em GLSL | `inicializaIluminacao`, `atualizaComponentesLuz`, `aplicaMaterial`, `defineLuzDoCenario`, `desenhaDemonstracao`, `inicializaTexturas`, `inicializaShaders`, `desenhaAgua`, `desenhaFogo` |
-| 10 | Passada 2D com as duas matrizes salvas; projeção em pixels; menu principal, jogo, pausa e instruções; cursor visível nos menus e capturado no jogo; botões com destaque e clique; mira, barra de nove itens com miniaturas 3D, quantidades, seleção por número ou roda; FPS, vida e posição em tela | `iniciaInterface`, `terminaInterface`, `desenhaInterface`, `desenhaBarraItens`, `desenhaInstrucoes`, `movimentoInterface`, `cliqueMouse`, `estadoJogo`, `botaoSelecionado` |
+| 10 | Passada 2D com as duas matrizes salvas; projeção em pixels; menu principal, jogo, pausa e instruções; cursor visível nos menus e capturado no jogo; botões com destaque e clique; mira, barra de nove itens com miniaturas 3D, quantidades, seleção por número ou roda; corações de vida; FPS, vida e posição em tela | `iniciaInterface`, `terminaInterface`, `desenhaInterface`, `desenhaBarraItens`, `desenhaCoracoes`, `desenhaInstrucoes`, `movimentoInterface`, `cliqueMouse`, `estadoJogo`, `botaoSelecionado` |
 
 ## Dependências
 
