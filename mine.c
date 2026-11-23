@@ -1,9 +1,9 @@
 /*
  * Projeto Minecraft
  *
- * Reúne o que foi visto nas semanas 1 a 8 e na aula de texturas e
- * transparência:
- *   Semana 1: janela, laço principal, tempo de quadro, FPS no título, ESC
+ * Reúne o que foi visto nas semanas 1 a 10, na aula de texturas e
+ * transparência e na de iluminação:
+ *   Semana 1: janela, laço principal, tempo de quadro, FPS, ESC
  *   Semana 2: primitivas (GL_QUADS) e cor por face
  *   Semana 3: cubo 3D, buffer de profundidade, descarte de faces,
  *             transformações e instâncias com glPushMatrix/glPopMatrix
@@ -12,94 +12,90 @@
  *   Semana 5: teclado lido por estado, movimento escalado pelo tempo de
  *             quadro, mouse com yaw e pitch e captura do cursor, colisão
  *             por caixa alinhada aos eixos, câmera em primeira e
- *             terceira pessoa e aproximação pela roda do mouse
- *   Iluminação (OpenGL 1.0): luz ambiente, difusa e especular,
- *             materiais, normais por face, normalização e Gouraud.
- *   Demonstração: tecla I abre/fecha cubo e coluna giratórios;
- *             teclas 1/2/3 escolhem componentes da luz, F/G escolhem
- *             sombreamento plano/Gouraud, O alterna luz pontual/direcional.
- *   Texturas e transparência: atlas PPM e texturas procedurais em memória,
- *             coordenadas por face, filtro GL_NEAREST,
- *             GL_MODULATE com iluminação por material, canal alfa
- *             com cor-chave, recorte (teste de alfa) nas folhas,
- *             mistura no vidro e na água, desenho em três passadas e
- *             remoção das faces que um vizinho opaco esconde
- *  Semana 8: incorporação de plantas como plano cruzado, itens largados
- *             no chão como sprites, céu como skydome, com sol e lua,
- *             neblina e ciclo de dia e noite.
- *
+ *             terceira pessoa e aproximação pelo campo de visão
+ *   Texturas e transparência: atlas de texturas lido de um PPM,
+ *             coordenadas por face, filtro GL_NEAREST, GL_MODULATE com a
+ *             iluminação, canal alfa com cor-chave, recorte (teste de
+ *             alfa) nas folhas, mistura no vidro e na água, desenho em
+ *             três passadas e remoção das faces que um vizinho opaco
+ *             esconde
+ *   Iluminação: luz ambiente, difusa e especular, materiais, normais
+ *             por face, normalização, sombreamento plano e Gouraud, luz
+ *             pontual e direcional, demonstração isolada (tecla I),
+ *             texturas procedurais e água e fogo em shaders GLSL
+ *   Semana 8: plantas em planos cruzados, itens como imagem que acompanha
+ *             a câmera, céu em domo com sol e lua, neblina e ciclo de dia
+ *             e noite, que move a luz direcional
  *   Semana 9: gameplay. Raio da mira com percurso em grade (Amanatides e
  *             Woo) e contorno do bloco selecionado; quebrar e colocar
  *             blocos pelo mouse (glutMouseFunc); itens soltos que caem e
  *             são recolhidos; gravidade, pulo e colisão vertical; inimigos
  *             articulados que surgem à noite, perseguem, atacam e são
- *             atacados (raio contra caixa). Os inimigos usam o ciclo de
- *             dia e noite da semana 8: só surgem à noite.
+ *             atacados (raio contra caixa)
+ *   Semana 10: interface 2D sobre a cena: menu principal, pausa e
+ *             instruções como estados do jogo, botões com o mouse, mira,
+ *             barra de nove itens com miniaturas 3D e informações em tela
  *
  * Cenário: terreno 16 x 16 com uma montanha, uma praia e o mar,
- * uma árvore, uma casinha de vidro e duas nuvens. Tudo é feito com um
- * único cubo de lado 1, desenhado várias vezes em posições diferentes.
+ * uma árvore, uma casinha de vidro, plantas, uma fogueira e duas nuvens.
+ * Os blocos são feitos com um único cubo de lado 1, desenhado várias
+ * vezes em posições diferentes.
  *
- * Texturas: o projeto combina atlas.ppm com texturas procedurais RGBA.
- * O atlas é lido da pasta atual, então precisa ser executado da pasta
- * do projeto.
- *
- * Astros: são carregados a partir dos arquivos sol.ppm e lua.ppm. O jogo
- * lê o arquivo da pasta atual, então precisa ser rodado da pasta do
- * projeto.
+ * Arquivos lidos da pasta atual (o jogo precisa ser rodado da pasta do
+ * projeto): atlas.ppm (texturas dos blocos), sol.ppm e lua.ppm (astros)
+ * e as imagens .ppm de assets/ui (logotipo, subtítulo e versão do menu).
  *
  * Eixos do mundo:
  *   x  esquerda (0) para a direita (15)
  *   y  altura: 0 é o fundo, cresce para cima
  *   z  fundo do mapa (0) para a frente (15), onde fica o mar
  *
- * Controles:
+ * Controles (no jogo; o menu principal usa o mouse, Tab e Enter):
  *   W / S        andar para frente / para trás
  *   A / D        andar para a esquerda / para a direita
  *   R            correr (segurando, junto com W, A, S, D)
  *   Setas < >    girar o olhar
  *   Espaço       pular (só apoiado no chão)
+ *   Mouse        direção do olhar
  *   Botão esq.   quebrar o bloco sob a mira, ou atacar um inimigo
- *   Botão dir.   colocar o bloco escolhido, encostado na face mirada
- *   1 a 8        escolher o tipo de bloco a colocar
- *   N            alternar dia / noite (para a demonstração)
- *   Mouse        direção do olhar (já começa capturado)
- *   Roda ou + -  aproximar / afastar (campo de visão)
+ *   Botão dir.   colocar o bloco da barra, encostado na face mirada
+ *   1 a 9, roda  escolher o espaço da barra de itens
+ *   + -          aproximar / afastar (campo de visão)
  *   Tab          liberar / capturar o cursor; clique também captura
  *   F5 ou V      alternar terceira (início) / primeira pessoa
  *   P            alternar perspectiva / ortográfica
- *   T            acelera ciclo de dia e noite
- *   ESC          abrir / fechar o menu (pausa, instruções)
- *   I            abrir/fechar a demonstração de iluminação
- *   1 / 2 / 3    somente ambiente / ambiente+difusa / todas
- *   F / G        sombreamento plano / Gouraud
- *   O            alternar luz pontual / direcional
- *   Q            sair (com o menu aberto)
- *
- * Iluminação: usa o pipeline fixo clássico e GL_SEPARATE_SPECULAR_COLOR.
- * Água e fogo usam shaders GLSL quando disponíveis; as texturas
- * procedurais usam RGBA para permitir recorte correto nas folhas.
+ *   N / T        pular para a noite ou o dia / ciclo de dia e noite rápido
+ *   O            alternar sol (direcional) / lâmpada (pontual)
+ *   X            alternar atlas / texturas procedurais
+ *   I            abrir / fechar a demonstração de iluminação; nela,
+ *                1 / 2 / 3 escolhem as componentes da luz, F / G o
+ *                sombreamento plano / Gouraud e E a emissão do cubo
+ *   ESC          abrir / fechar a pausa, ou voltar das instruções
+ *   Q            sair (em um menu)
  *
  * Organização do arquivo, de cima para baixo:
- *   constantes, declarações antecipadas, texturas e transparência
- *   (tudo o que essa aula trouxe, num bloco só), mundo, colisão,
- *   câmera, entrada, menu e, no fim, desenho do quadro e main()
+ *   constantes, declarações antecipadas, texturas e transparência,
+ *   iluminação, texturas procedurais e shaders, mundo, colisão, câmera,
+ *   seleção e edição de blocos, itens, inimigos, dia e noite, entrada,
+ *   menu e interface, mira e, no fim, desenho do quadro e main()
  *
  * Compilar e rodar (Linux):
  *   gcc mine.c -o mine -lGLEW -lGL -lGLU -lglut -lm && ./mine
  *
- * Compilar e rodar (Windows, MinGW-w64 com freeglut e GLEW):
- *   gcc mine.c -o mine.exe -lglew32 -lfreeglut -lopengl32 -lglu32 -lm
+ * Compilar e rodar (Windows, MinGW-w64 com freeglut e GLEW; o windres
+ * embute o ícone):
+ *   windres mine.rc -O coff -o mine.res.o
+ *   gcc mine.c mine.res.o -o mine.exe -lglew32 -lfreeglut -lopengl32 -lglu32 -lm
  *   mine.exe
  *
- * Compilar e rodar (macOS, com a GLUT da Apple; sem roda do mouse e
- * sem Shift para descer):
+ * Compilar e rodar (macOS, com a GLUT da Apple; sem roda do mouse):
  *   clang mine.c -o mine -framework OpenGL -framework GLUT \
  *         -framework ApplicationServices -lm && ./mine
  */
 
 #ifdef _WIN32
 #include <windows.h>
+#include "resource.h"
 #endif
 
 #ifdef __APPLE__
@@ -125,6 +121,26 @@
 
 #define PI 3.14159265f
 #define INFINITO 1e30f          /* "nunca": distância de um eixo paralelo ao raio */
+
+/* Modos didáticos opcionais para a demonstração da Semana 10.
+   Sem nenhuma flag, o projeto mantém o comportamento original. */
+#ifndef DEMO_UI_MATRIX_ONLY   //Simula uma interface de usuário mínima, só com a matriz de blocos
+#define DEMO_UI_MATRIX_ONLY 0 //Guarda apenas a matriz de projeção
+#endif
+
+#ifndef DEMO_UI_FIXED_BAR   //Simula uma interface de usuário mínima, só com a barra fixa de itens
+#define DEMO_UI_FIXED_BAR 0 //A barra sai do centro ao redimensionar a janela
+#endif
+
+#ifndef DEMO_UI_RAW_MOUSE_Y   //Simula a necessidade de considerar o espelhamento do mouse
+#define DEMO_UI_RAW_MOUSE_Y 0 //A GLUT fornece a posição do mouse com origem no canto superior esquerdo
+#endif                        //A interface OpenGL foi configurada com origem no canto inferior esquerdo
+
+#ifndef DEMO_UI_PAUSE_CLOCK   //Simula o arremesso do personagem na pausa segurando botão de movimento
+#define DEMO_UI_PAUSE_CLOCK 0 //O relógio do jogo continua contando mesmo pausado, precisa reiniciar
+#endif
+
+#define DEMO_UI_FIXED_BAR_X 215.0f
 
 /* ------------------------------------------------------------------ */
 /* Tipos de bloco                                                     */
@@ -208,7 +224,6 @@
 #define CEL_AREIA       9
 #define CEL_NEVE        10
 #define SEM_TEXTURA     (-1)    /* nuvem e personagem: cor sólida */
-
 /* As 6 faces de um bloco, uma por bit, para dizer quais desenhar:
    FACE_TOPO | FACE_BASE são só o topo e a base */
 #define FACE_FRENTE   1         /* z = 1 */
@@ -338,6 +353,7 @@ extern GLuint atlas;                /* objeto de textura do atlas */
 unsigned char *lerPPM(const char *nome, int *l, int *a);
 unsigned char *converteRGBA(const unsigned char *rgb, int l, int a);
 void carregaAtlas(void);
+void carregaTexturasUI(void);
 
 /* 2. célula do atlas de cada face */
 int  celulaDaFace(int tipo, int face);
@@ -373,6 +389,13 @@ void posicaoDoOlho(float *x, float *y, float *z);
  */
 /* tipo de cada bloco, indexado como mundo[x][y][z] (ver MUNDO) */
 extern unsigned char mundo[LADO][ALTURA_MUNDO][LADO];
+
+/* Barra de itens da Semana 10. Os nove tipos são os blocos que o botão
+   direito coloca; o número de cada espaço é quantos itens daquele tipo
+   foram recolhidos (contagem[], da semana 9). */
+#define NUM_ITENS 9
+extern const int tiposItens[NUM_ITENS];
+extern int itemSelecionado;
 
 /* desenho de um bloco */
 void corDaFace(int tipo, float brilho, float tom);
@@ -466,7 +489,6 @@ typedef struct {
 
 extern Alvo alvo;                   /* resultado do quadro corrente */
 extern int  inimigoMirado;          /* índice do inimigo sob a mira, ou -1 */
-extern int  tipoSelecionado;        /* tipo colocado pelo botão direito */
 
 int  blocoSelecionavel(int tipo);
 int  percursoEmGrade(float ox, float oy, float oz, float dx, float dy, float dz,
@@ -560,17 +582,27 @@ void rodaMouse(int roda, int direcao, int x, int y);
 /* atualização */
 void atualiza(void);
 
-/*
- * Menu de pausa, aberto e fechado com ESC, com as instruções de
- * movimentação. Enquanto ele está aberto o jogo fica parado e o cursor
- * fica livre.
- */
-extern int menuAberto;              /* 1 enquanto o menu está na tela */
+/* Interface e estados do jogo. */
+typedef enum {
+    ESTADO_MENU_PRINCIPAL,
+    ESTADO_JOGANDO,
+    ESTADO_PAUSADO,
+    ESTADO_INSTRUCOES
+} EstadoJogo;
 
+extern EstadoJogo estadoJogo;
+extern int botaoSelecionado;
+
+void iniciaInterface(void);
+void terminaInterface(void);
 void abreMenu(void);
 void fechaMenu(void);
 void alternaMenu(void);
-void desenhaMenu(void);             /* chamada por desenha(), depois da cena */
+void desenhaInterface(void);
+void movimentoInterface(int x, int y);
+static int numeroBotoesTela(void);
+static void acionaBotaoTela(int indice);
+static int pontoNoBotao(int x, int y, int indice);
 
 /*
  * Mira no centro da tela e informações provisórias no título da janela
@@ -672,6 +704,7 @@ unsigned char *converteRGBA(const unsigned char *rgb, int l, int a)
         }
         else if (celula == CEL_VIDRO) rgba[4*i+3] = ALFA_VIDRO;
         else if (celula == CEL_AGUA)  rgba[4*i+3] = ALFA_AGUA;
+
     }
     return rgba;
 }
@@ -691,6 +724,16 @@ unsigned char *converteRGBA(const unsigned char *rgb, int l, int a)
 /* ------------------------------------------------------------------ */
 
 GLuint atlas;
+
+typedef struct {
+    GLuint id;
+    int largura;
+    int altura;
+} TexturaUI;
+
+TexturaUI texturaLogo;
+TexturaUI texturaSubtitulo;
+TexturaUI texturaVersao;
 
 void carregaAtlas(void)
 {
@@ -715,6 +758,66 @@ void carregaAtlas(void)
 
     free(rgb);                              /* a placa de vídeo já tem a cópia */
     free(rgba);
+}
+
+/* ------------------------------------------------------------------ */
+/* Texturas da interface                                              */
+/* As imagens do menu ficam fora do atlas: são faixas largas, não     */
+/* células 16 x 16 de blocos. O mesmo leitor PPM é reutilizado, mas   */
+/* os pixels transparentes vêm como magenta e viram alfa zero; o      */
+/* preto real das bordas permanece opaco.                              */
+/* ------------------------------------------------------------------ */
+
+static unsigned char *converteUIRGBA(const unsigned char *rgb, int l, int a)
+{
+    unsigned char *rgba = malloc(4 * l * a);
+    int i;
+
+    if (rgba == NULL) return NULL;
+    for (i = 0; i < l * a; i++) {
+        unsigned char r = rgb[3*i], g = rgb[3*i+1], b = rgb[3*i+2];
+        rgba[4*i] = r;
+        rgba[4*i+1] = g;
+        rgba[4*i+2] = b;
+        rgba[4*i+3] = (r == 255 && g == 0 && b == 255) ? 0 : 255;
+    }
+    return rgba;
+}
+
+static TexturaUI carregaUmaTexturaUI(const char *nome)
+{
+    TexturaUI resultado = { 0, 0, 0 };
+    unsigned char *rgb, *rgba;
+
+    rgb = lerPPM(nome, &resultado.largura, &resultado.altura);
+    if (rgb == NULL) {
+        printf("Erro: não consegui ler %s\n", nome);
+        exit(1);
+    }
+    rgba = converteUIRGBA(rgb, resultado.largura, resultado.altura);
+    free(rgb);
+    if (rgba == NULL) {
+        printf("Erro: memória insuficiente para %s\n", nome);
+        exit(1);
+    }
+
+    glGenTextures(1, &resultado.id);
+    glBindTexture(GL_TEXTURE_2D, resultado.id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                 resultado.largura, resultado.altura, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    free(rgba);
+    return resultado;
+}
+
+void carregaTexturasUI(void)
+{
+    texturaLogo = carregaUmaTexturaUI("assets/ui/ui_logo.ppm");
+    texturaSubtitulo = carregaUmaTexturaUI("assets/ui/ui_subtitulo.ppm");
+    texturaVersao = carregaUmaTexturaUI("assets/ui/ui_versao.ppm");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1915,6 +2018,11 @@ void construirMundo(void)
     nuvemEm(10, 0, 4, 2);                   /* sobre a árvore, mais ao fundo */
 }
 
+const int tiposItens[NUM_ITENS] = {
+    GRAMA, TERRA, PEDRA, TRONCO, FOLHA, AREIA, AGUA, NEVE, VIDRO
+};
+int itemSelecionado = 0;
+
 
 /* ================================================================== */
 /* COLISÃO                                                            */
@@ -2733,12 +2841,8 @@ void desenhaContorno(void)
 /* ================================================================== */
 
 
-int tipoSelecionado = GRAMA;
-
-/* teclas 1 a 8 */
-static const int tiposColocaveis[8] = {
-    GRAMA, TERRA, PEDRA, TRONCO, FOLHA, AREIA, NEVE, VIDRO
-};
+/* O tipo colocado é o do espaço escolhido na barra de itens da
+   semana 10 (teclas 1 a 9 ou roda do mouse): tiposItens[itemSelecionado]. */
 
 /* Botão esquerdo: a célula atingida vira ar e um item do mesmo tipo
    aparece no meio dela. Cai se não houver apoio embaixo. */
@@ -2757,7 +2861,7 @@ void quebraBloco(void)
    (e as dos inimigos) ainda cabe, e desfaz se não couber. */
 void colocaBlocoMirado(void)
 {
-    int tipo = tipoSelecionado;
+    int tipo = tiposItens[itemSelecionado];
     int anterior, ok, i;
 
     if (!dentroDoMundo(alvo.ax, alvo.ay, alvo.az)) return;
@@ -3253,14 +3357,54 @@ void teclado(unsigned char tecla, int x, int y)
 
     teclas[tolower(tecla)] = 1;             /* estado: para as ações contínuas */
 
-    if (menuAberto) {                       /* com o menu, só duas teclas valem */
-        if (tecla == 27) fechaMenu();       /* 27 é o código da tecla ESC */
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL) {
+        if (tecla == 27 || tolower(tecla) == 'q') exit(0);
+        if (tecla == 9) {
+            botaoSelecionado = (botaoSelecionado + 1) % 2;
+        } else if (tecla == 13 || tecla == ' ') {
+            if (botaoSelecionado == 0) fechaMenu();
+            else exit(0);
+        }
+        glutPostRedisplay();
+        return;
+    }
+
+    if (estadoJogo == ESTADO_PAUSADO) {
+        if (tecla == 27) fechaMenu();
         else if (tolower(tecla) == 'q') exit(0);
+        else if (tecla == 9) botaoSelecionado = (botaoSelecionado + 1) % 3;
+        else if (tecla == 13 || tecla == ' ') {
+            if (botaoSelecionado == 0) fechaMenu();
+            else if (botaoSelecionado == 1) estadoJogo = ESTADO_INSTRUCOES;
+            else exit(0);
+        }
+        glutPostRedisplay();
+        return;
+    }
+
+    if (estadoJogo == ESTADO_INSTRUCOES) {
+        if (tecla == 27 || tecla == 13 || tecla == ' ') {
+            estadoJogo = ESTADO_PAUSADO;
+            botaoSelecionado = 0;
+        } else if (tolower(tecla) == 'q') {
+            exit(0);
+        }
+        glutPostRedisplay();
         return;
     }
 
     switch (tolower(tecla)) {               /* evento: para as ações discretas */
         case 27:  abreMenu(); break;        /* ESC: menu de pausa */
+        case '1': case '2': case '3': case '4': case '5':
+        case '6': case '7': case '8': case '9':
+            if (modoDemonstracao && tecla <= '3') {  /* na demonstração: luz */
+                modoComponentesLuz = tecla - '0';
+                atualizaComponentesLuz();
+                break;
+            }
+            itemSelecionado = tecla - '1';  /* espaço da barra = bloco colocado */
+            tituloSujo = 1;
+            break;
         case 9:   alternaCaptura(); break;  /* 9 é o código da tecla Tab */
         case 'p':
             projecaoOrtogonal = !projecaoOrtogonal;
@@ -3295,16 +3439,6 @@ void teclado(unsigned char tecla, int x, int y)
         case 'n':                           /* pula para a noite ou para o dia */
             anguloSol = ehNoite() ? 18.0f : 216.0f;
             break;
-        case '1': case '2': case '3': case '4':     /* escolhe o tipo colocado */
-        case '5': case '6': case '7': case '8':
-            if (modoDemonstracao && tecla <= '3') {  /* na demonstração: luz */
-                modoComponentesLuz = tecla - '0';
-                atualizaComponentesLuz();
-                break;
-            }
-            tipoSelecionado = tiposColocaveis[tecla - '1'];
-            tituloSujo = 1;
-            break;
         case 'x':                           /* atlas / texturas procedurais */
             usaTexturasProcedurais = !usaTexturasProcedurais;
             break;
@@ -3323,7 +3457,7 @@ void especial(int tecla, int x, int y)
 
     if (tecla >= 0 && tecla < 256) especiais[tecla] = 1;
 
-    if (tecla == GLUT_KEY_F5 && !menuAberto)               /* evento: alterna a câmera */
+    if (tecla == GLUT_KEY_F5 && estadoJogo == ESTADO_JOGANDO)
         modoCamera = (modoCamera == PRIMEIRA_PESSOA) ? TERCEIRA_PESSOA
                                                      : PRIMEIRA_PESSOA;
 }
@@ -3363,6 +3497,11 @@ void movimentoMouse(int x, int y)
 {
     int cx = larguraJanela / 2, cy = alturaJanela / 2;
     int dx = x - cx, dy = y - cy;
+
+    if (estadoJogo != ESTADO_JOGANDO) {
+        movimentoInterface(x, y);
+        return;
+    }
 
     if (!cursorCapturado) return;
 
@@ -3434,9 +3573,27 @@ void alternaCaptura(void)
    quebra, ataca ou coloca (ver cliqueEdicao). */
 void cliqueMouse(int botao, int estado, int x, int y)
 {
-    (void)x; (void)y;
-    if (estado != GLUT_DOWN || menuAberto) return;
+    if (estado != GLUT_DOWN) return;
 
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL ||
+        estadoJogo == ESTADO_PAUSADO ||
+        estadoJogo == ESTADO_INSTRUCOES) {
+        if (botao == GLUT_LEFT_BUTTON) {
+            int i;
+
+            for (i = 0; i < numeroBotoesTela(); i++) {
+                if (pontoNoBotao(x, y, i)) {
+                    botaoSelecionado = i;
+                    acionaBotaoTela(i);
+                    return;
+                }
+            }
+        }
+        return;
+    }
+
+    /* jogando: com o cursor liberado, o clique só captura de novo; com
+       ele capturado, quebra, ataca ou coloca (ver cliqueEdicao) */
     if (!cursorCapturado) capturaCursor();
     else                  cliqueEdicao(botao);
 }
@@ -3469,8 +3626,9 @@ void mudaZoom(int direcao)
 void rodaMouse(int roda, int direcao, int x, int y)
 {
     (void)roda; (void)x; (void)y;
-    if (!menuAberto)
-        mudaZoom(direcao);                  /* roda para cima aproxima */
+    if (estadoJogo == ESTADO_JOGANDO)
+        itemSelecionado = (itemSelecionado + (direcao > 0 ? 1 : NUM_ITENS - 1)) % NUM_ITENS;
+    glutPostRedisplay();
 }
 
 /* ------------------------------------------------------------------ */
@@ -3493,14 +3651,26 @@ float amplitudeCaminhada = 0.0f; /* 0 parado, 1 andando; suaviza o balanço */
 void atualiza(void)
 {
     int agora = glutGet(GLUT_ELAPSED_TIME);
+#if DEMO_UI_PAUSE_CLOCK
+    /* No modo didático, o relógio fica congelado enquanto o jogo está
+       pausado. Ao retornar, dt inclui toda a duração da pausa. */
+    if (estadoJogo != ESTADO_JOGANDO) {
+        glutPostRedisplay();
+        return;
+    }
+
+    float dt = (agora - ultimoTempo) / 1000.0f;
+    ultimoTempo = agora;
+#else
     float dt = (agora - ultimoTempo) / 1000.0f;
     ultimoTempo = agora;
     if (dt > DT_MAXIMO) dt = DT_MAXIMO;
 
-    if (menuAberto) {                       /* pausa: o relógio continua sendo */
-        glutPostRedisplay();                /* lido, para o primeiro dt depois */
-        return;                             /* de fechar não ser enorme */
+    if (estadoJogo != ESTADO_JOGANDO) {
+        glutPostRedisplay();
+        return;
     }
+#endif
 
     if (modoDemonstracao) {
         anguloDemonstracao += 35.0f * dt;
@@ -3579,27 +3749,39 @@ void atualiza(void)
 /* ================================================================== */
 
 
-int menuAberto = 0;
+EstadoJogo estadoJogo = ESTADO_MENU_PRINCIPAL;
+int botaoSelecionado = 0;
+int fpsExibido = 0;
 
-/* Abrir pausa o jogo (atualiza() deixa de mover o personagem) e libera
-   o cursor, para o usuário poder usar o mouse fora do jogo. Fechar
-   captura o cursor de novo. */
 void abreMenu(void)
 {
-    menuAberto = 1;
-    liberaCursor();
+    if (estadoJogo == ESTADO_JOGANDO) {
+        estadoJogo = ESTADO_PAUSADO;
+        botaoSelecionado = 0;
+        liberaCursor();
+    }
 }
 
 void fechaMenu(void)
 {
-    menuAberto = 0;
+    EstadoJogo estadoAnterior = estadoJogo;
+    estadoJogo = ESTADO_JOGANDO;
     capturaCursor();
+#if DEMO_UI_PAUSE_CLOCK
+    /* O menu principal não deve gerar um arremesso ao iniciar. O defeito
+       demonstrado vale somente para o retorno de uma pausa. */
+    if (estadoAnterior != ESTADO_PAUSADO)
+        ultimoTempo = glutGet(GLUT_ELAPSED_TIME);
+#else
+    (void)estadoAnterior;
+    ultimoTempo = glutGet(GLUT_ELAPSED_TIME);
+#endif
 }
 
 void alternaMenu(void)
 {
-    if (menuAberto) fechaMenu();
-    else            abreMenu();
+    if (estadoJogo == ESTADO_JOGANDO) abreMenu();
+    else if (estadoJogo == ESTADO_PAUSADO) fechaMenu();
 }
 
 /* ------------------------------------------------------------------ */
@@ -3665,115 +3847,380 @@ static void retangulo(float x0, float y0, float x1, float y1)
 }
 
 /* ------------------------------------------------------------------ */
-/* Menu: desenhado por cima da cena numa segunda passada, em 2D.      */
-/* Projeção ortográfica em pixels (gluOrtho2D), modelo-visualização   */
-/* identidade e teste de profundidade desligado, para o painel não    */
-/* ficar atrás dos blocos. A cena é escurecida com transparência      */
-/* (alfa 0.5). As matrizes 3D são guardadas e devolvidas no fim. A    */
-/* cor do texto vale a partir do glRasterPos, por isso glColor vem    */
-/* antes.                                                             */
+/* Interface 2D: esta e a unica passada que usa coordenadas em pixels. */
+/* As duas matrizes sao guardadas para a camera 3D nao deslocar a UI.  */
 /* ------------------------------------------------------------------ */
 
-static const char *instrucoes[][2] = {
-    { "W / S",                    "andar para frente / para trás" },
-    { "A / D",                    "andar para a esquerda / para a direita" },
-    { "R (segurando)",            "correr" },
-    { "Espaço",                   "pular" },
-    { "Setas esquerda / direita", "girar o olhar" },
-    { "Mouse",                    "olhar ao redor" },
-    { "Botão esquerdo",           "quebrar bloco / atacar" },
-    { "Botão direito",            "colocar bloco" },
-    { "1 a 8",                    "escolher o bloco a colocar" },
-    { "N",                        "alternar dia / noite" },
-    { "I",                        "demonstração de iluminação" },
-    { "1 / 2 / 3",                "componentes da luz" },
-    { "F / G",                    "sombreamento plano / Gouraud" },
-    { "O",                        "luz pontual / direcional" },
-    { "E",                        "alternar emissao luminosa do cubo" },
-    { "Agua e fogo",               "efeitos animados por shaders GLSL" },
-};
-
-#define NUM_INSTRUCOES (int)(sizeof(instrucoes) / sizeof(instrucoes[0]))
-#define ALTURA_LINHA 30
-#define MARGEM       40
-#define ESPACO_COLUNAS 40
-
-void desenhaMenu(void)
+void iniciaInterface(void)
 {
-    const char *titulo = "Controles";
-    const char *rodape = "ESC volta ao jogo     Q sai do jogo";
-    int larguraChaves = 0, larguraAcoes = 0, i;
-
-    /* 1. configuração 2D, guardando a 3D */
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
-    gluOrtho2D(0, larguraJanela, 0, alturaJanela);
+    /* Mantem uma unidade em x/y igual a um pixel, mas deixa profundidade
+       suficiente para os mini-cubos da barra usarem o Z-buffer. */
+    glOrtho(0, larguraJanela, 0, alturaJanela, -200.0, 200.0);
     glMatrixMode(GL_MODELVIEW);
+#if DEMO_UI_MATRIX_ONLY
+    /* Defeito intencional para a demonstração: a matriz de modelo e visão
+       continua contendo o gluLookAt da câmera. */
+#else
     glPushMatrix();
     glLoadIdentity();
+#endif
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    glDisable(GL_LIGHTING);                 /* painel e texto não recebem luz */
-    glDisable(GL_TEXTURE_2D);               /* painel e texto em cor sólida */
     glDisable(GL_LIGHTING);
     glDisable(GL_FOG);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_TEXTURE_2D);
+}
 
-    /* 2. escurece a cena */
-    glColor4f(0.0f, 0.0f, 0.0f, 0.5f);
-    retangulo(0, 0, larguraJanela, alturaJanela);
-
-    /* 3. tamanho e posição do painel, a partir do texto */
-    for (i = 0; i < NUM_INSTRUCOES; i++) {
-        int lc = larguraTexto(FONTE, instrucoes[i][0]);
-        int la = larguraTexto(FONTE, instrucoes[i][1]);
-        if (lc > larguraChaves) larguraChaves = lc;
-        if (la > larguraAcoes)  larguraAcoes  = la;
-    }
-
-    float larguraPainel = larguraChaves + ESPACO_COLUNAS + larguraAcoes + 2 * MARGEM;
-    float alturaPainel  = (NUM_INSTRUCOES + 4) * ALTURA_LINHA + 2 * MARGEM;
-    float esquerda = (larguraJanela - larguraPainel) / 2.0f;
-    float topo     = (alturaJanela + alturaPainel) / 2.0f;
-
-    glColor4f(0.08f, 0.08f, 0.12f, 0.85f);
-    retangulo(esquerda, topo - alturaPainel, esquerda + larguraPainel, topo);
-
+void terminaInterface(void)
+{
     glDisable(GL_BLEND);
-
-    /* 4. texto: a cor vem antes do glRasterPos (feito em escreve) */
-    float y = topo - MARGEM - 20;
-    glColor3f(1.0f, 1.0f, 1.0f);
-    escreve(FONTE_TITULO,
-            (larguraJanela - larguraTexto(FONTE_TITULO, titulo)) / 2.0f, y, titulo);
-
-    y -= 2 * ALTURA_LINHA;
-    for (i = 0; i < NUM_INSTRUCOES; i++) {
-        glColor3f(1.0f, 0.85f, 0.35f);                  /* tecla: amarelo */
-        escreve(FONTE, esquerda + MARGEM, y, instrucoes[i][0]);
-        glColor3f(0.92f, 0.92f, 0.92f);                 /* ação: branco */
-        escreve(FONTE, esquerda + MARGEM + larguraChaves + ESPACO_COLUNAS, y,
-                instrucoes[i][1]);
-        y -= ALTURA_LINHA;
-    }
-
-    y -= ALTURA_LINHA;
-    glColor3f(0.65f, 0.65f, 0.70f);
-    escreve(FONTE, (larguraJanela - larguraTexto(FONTE, rodape)) / 2.0f, y, rodape);
-
-    /* 5. devolve a configuração 3D */
+    glDepthMask(GL_TRUE);
+    glEnable(GL_TEXTURE_2D);
+    /* Os elementos da UI usam texturas próprias. A cena 3D do próximo
+       quadro deve voltar a encontrar o atlas ligado ao estado corrente. */
+    glBindTexture(GL_TEXTURE_2D, atlas);
     glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_TEXTURE_2D);
-    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHTING);                  /* a cena 3D usa luz e neblina */
     glEnable(GL_FOG);
-    glPopMatrix();                                      /* modelo-visualização */
+#if DEMO_UI_MATRIX_ONLY
+    /* A matriz MODELVIEW não foi empilhada neste modo didático. */
+#else
+    glPopMatrix();
+#endif
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
+}
+
+static void desenhaTextoCentralizado(void *fonte, float x, float y,
+                                     const char *texto)
+{
+    escreve(fonte, x - larguraTexto(fonte, texto) / 2.0f, y, texto);
+}
+
+static void desenhaImagemUI(const TexturaUI *imagem,
+                            float x, float y, float largura, float altura)
+{
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, imagem->id);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+    glBegin(GL_QUADS);
+    /* O PPM é lido de cima para baixo; as coordenadas verticais são
+       invertidas para a imagem aparecer na orientação original. */
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(x, y);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(x + largura, y);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(x + largura, y + altura);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(x, y + altura);
+    glEnd();
+
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+}
+
+static float larguraLimitada(float larguraOriginal, float larguraMaxima,
+                             float margem)
+{
+    float disponivel = larguraJanela - 2.0f * margem;
+    if (disponivel < 1.0f) disponivel = 1.0f;
+    return larguraOriginal < larguraMaxima
+        ? (larguraOriginal < disponivel ? larguraOriginal : disponivel)
+        : (larguraMaxima < disponivel ? larguraMaxima : disponivel);
+}
+
+static void desenhaIdentidadeMenuPrincipal(void)
+{
+    float larguraLogo = larguraLimitada((float)texturaLogo.largura,
+                                         760.0f, 40.0f);
+    float alturaLogo = larguraLogo * texturaLogo.altura / texturaLogo.largura;
+    float xLogo = (larguraJanela - larguraLogo) / 2.0f;
+    float yLogo = alturaJanela - 28.0f - alturaLogo;
+
+    float larguraSubtitulo = larguraLimitada((float)texturaSubtitulo.largura,
+                                              380.0f, 40.0f);
+    float alturaSubtitulo = larguraSubtitulo * texturaSubtitulo.altura /
+                            texturaSubtitulo.largura;
+    float xSubtitulo = (larguraJanela - larguraSubtitulo) / 2.0f;
+    float ySubtitulo = yLogo - alturaSubtitulo + 8.0f;
+
+    float larguraVersao = larguraLimitada((float)texturaVersao.largura,
+                                           150.0f, 20.0f);
+    float alturaVersao = larguraVersao * texturaVersao.altura /
+                         texturaVersao.largura;
+
+    desenhaImagemUI(&texturaLogo, xLogo, yLogo, larguraLogo, alturaLogo);
+    desenhaImagemUI(&texturaSubtitulo, xSubtitulo, ySubtitulo,
+                    larguraSubtitulo, alturaSubtitulo);
+    desenhaImagemUI(&texturaVersao, 20.0f, 20.0f,
+                    larguraVersao, alturaVersao);
+}
+
+static int numeroBotoesTela(void)
+{
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL) return 2;
+    if (estadoJogo == ESTADO_PAUSADO) return 3;
+    return 0; /* instrucoes: retorno pelo teclado */
+}
+
+static void acionaBotaoTela(int indice)
+{
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL) {
+        if (indice == 0) fechaMenu();
+        else exit(0);
+    } else if (estadoJogo == ESTADO_PAUSADO) {
+        if (indice == 0) fechaMenu();
+        else if (indice == 1) {
+            estadoJogo = ESTADO_INSTRUCOES;
+            botaoSelecionado = 0;
+        } else exit(0);
+    } else if (estadoJogo == ESTADO_INSTRUCOES) {
+        estadoJogo = ESTADO_PAUSADO;
+        botaoSelecionado = 0;
+    }
+}
+
+static void limitesBotao(int indice, float *x0, float *y0,
+                         float *x1, float *y1)
+{
+    float centroY;
+
+    if (numeroBotoesTela() == 3)
+        centroY = alturaJanela * (indice == 0 ? 0.42f :
+                                  indice == 1 ? 0.29f : 0.16f);
+    else if (numeroBotoesTela() == 1)
+        centroY = alturaJanela * 0.16f;
+    else
+        centroY = alturaJanela * (indice == 0 ? 0.38f : 0.25f);
+
+    *x0 = (larguraJanela - 300.0f) / 2.0f;
+    *x1 = *x0 + 300.0f;
+    *y0 = centroY - 36.0f;
+    *y1 = centroY + 36.0f;
+}
+
+static int pontoNoBotao(int x, int y, int indice)
+{
+    float x0, y0, x1, y1;
+    limitesBotao(indice, &x0, &y0, &x1, &y1);
+#if !DEMO_UI_RAW_MOUSE_Y
+    y = alturaJanela - y;
+#endif
+    return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
+static void desenhaBotao(int indice, const char *texto)
+{
+    float x0, y0, x1, y1;
+    limitesBotao(indice, &x0, &y0, &x1, &y1);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(indice == botaoSelecionado ? 0.10f : 0.06f,
+              indice == botaoSelecionado ? 0.65f : 0.18f,
+              indice == botaoSelecionado ? 0.95f : 0.25f, 0.95f);
+    retangulo(x0, y0, x1, y1);
+    glDisable(GL_BLEND);
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+    desenhaTextoCentralizado(FONTE_TITULO, (x0 + x1) / 2.0f, y0 + 23.0f, texto);
+}
+
+/* Desenha um bloco real, reduzido e girado, dentro de um slot 2D. O
+   centro e a posicao continuam em pixels; apenas a aparencia do item
+   usa a geometria 3D ja existente. */
+static void desenhaIconeBloco3D(int tipo, float x, float y, float lado)
+{
+    float tamanho = lado * 0.429f; /* aumento de 10% sobre a escala atual */
+
+    glPushMatrix();
+    glTranslatef(x + lado / 2.0f, y + lado / 2.0f, 0.0f);
+    glRotatef(28.0f, 1.0f, 0.0f, 0.0f);
+    glRotatef(-42.0f, 0.0f, 1.0f, 0.0f);
+    glScalef(tamanho, tamanho, tamanho);
+    glTranslatef(-0.5f, -0.5f, -0.5f);
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, atlas);
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    desenhaBloco(tipo, 1.0f, TODAS_FACES);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glPopMatrix();
+}
+
+static void desenhaBarraItens(void)
+{
+    float lado = 58.0f, espaco = 6.0f;
+    float largura = NUM_ITENS * lado + (NUM_ITENS - 1) * espaco + 24.0f;
+#if DEMO_UI_FIXED_BAR
+    /* Defeito intencional: a barra fica presa à posição da janela inicial. */
+    float x0 = DEMO_UI_FIXED_BAR_X;
+#else
+    float x0 = (larguraJanela - largura) / 2.0f;
+#endif
+    float y0 = 18.0f;
+    int i;
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.02f, 0.02f, 0.03f, 0.80f);
+    retangulo(x0, y0, x0 + largura, y0 + lado + 24.0f);
+    glDisable(GL_BLEND);
+
+    /* Limpa somente a profundidade para os cubos da interface nao serem
+       escondidos pela cena 3D ja desenhada. */
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    for (i = 0; i < NUM_ITENS; i++) {
+        float x = x0 + 12.0f + i * (lado + espaco);
+        glColor3f(i == itemSelecionado ? 1.0f : 0.35f,
+                  i == itemSelecionado ? 0.85f : 0.35f,
+                  i == itemSelecionado ? 0.20f : 0.35f);
+        retangulo(x - 2.0f, y0 + 10.0f, x + lado + 2.0f, y0 + lado + 14.0f);
+        desenhaIconeBloco3D(tiposItens[i], x, y0 + 12.0f, lado);
+        glDisable(GL_TEXTURE_2D);
+        { char quantidade[16];
+          sprintf(quantidade, "%d", contagem[tiposItens[i]]);
+          float textoX = x + lado - larguraTexto(FONTE, quantidade) - 3.0f;
+          float textoY = y0 + 15.0f;
+          /* sombra preta deslocada para destacar o numero */
+          glColor3f(0.0f, 0.0f, 0.0f);
+          escreve(FONTE, textoX + 1.0f, textoY - 1.0f, quantidade);
+          glColor3f(1.0f, 1.0f, 1.0f);
+          escreve(FONTE, textoX, textoY, quantidade); }
+    }
+}
+
+static void desenhaInstrucoes(void)
+{
+    static const char *linhas[][2] = {
+        { "W / A / S / D",          "andar" },
+        { "R (segurando)",          "correr" },
+        { "Espaco",                 "pular" },
+        { "Mouse / setas",          "olhar ao redor" },
+        { "Botao esquerdo",         "quebrar bloco / atacar" },
+        { "Botao direito",          "colocar o bloco da barra" },
+        { "1 a 9 / roda",           "escolher o espaco da barra" },
+        { "Tab",                    "liberar ou capturar o cursor" },
+        { "V ou F5",                "alternar primeira/terceira pessoa" },
+        { "P",                      "alternar perspectiva/ortografica" },
+        { "+ / -",                  "aproximar ou afastar" },
+        { "N / T",                  "dia ou noite / ciclo rapido" },
+        { "O",                      "sol ou lampada pontual" },
+        { "X",                      "atlas ou texturas procedurais" },
+        { "I",                      "demonstracao de iluminacao" },
+        { "  1 2 3 / F G / E",      "  luz / sombreamento / emissao" },
+        { "ESC",                    "abrir pausa ou voltar" },
+        { "Q (menu)",               "sair do jogo" }
+    };
+    int i;
+    float painelY = 78.0f;
+    float painelW = larguraJanela < 868 ? larguraJanela - 48.0f : 820.0f;
+    float painelX = (larguraJanela - painelW) / 2.0f;
+    float painelH = alturaJanela - 120.0f;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.03f, 0.05f, 0.08f, 0.94f);
+    retangulo(painelX, painelY, painelX + painelW, painelY + painelH);
+    glDisable(GL_BLEND);
+
+    glColor3f(1.0f, 0.86f, 0.30f);
+    desenhaTextoCentralizado(FONTE_TITULO, larguraJanela / 2.0f,
+                             painelY + painelH - 42.0f, "INSTRUÇÕES");
+
+    for (i = 0; i < (int)(sizeof(linhas) / sizeof(linhas[0])); i++) {
+        float y = painelY + painelH - 88.0f - i * 26.0f;
+        glColor3f(1.0f, 0.86f, 0.30f);
+        escreve(FONTE, painelX + 28.0f, y, linhas[i][0]);
+        glColor3f(0.92f, 0.92f, 0.92f);
+        escreve(FONTE, painelX + 220.0f, y, linhas[i][1]);
+    }
+
+}
+
+static void desenhaInformacoes(void)
+{
+    char texto[128];
+    sprintf(texto, "FPS: %d   Vida: %d   %s   Posicao: (%.2f, %.2f, %.2f)",
+            fpsExibido, vidaJogador, ehNoite() ? "Noite" : "Dia",
+            jogadorX, jogadorY, jogadorZ);
+    glDisable(GL_TEXTURE_2D);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    escreve(FONTE, 14.0f, alturaJanela - 28.0f, texto);
+}
+
+void movimentoInterface(int x, int y)
+{
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL ||
+        estadoJogo == ESTADO_PAUSADO ||
+        estadoJogo == ESTADO_INSTRUCOES) {
+        int i;
+        for (i = 0; i < numeroBotoesTela(); i++)
+            if (pontoNoBotao(x, y, i)) {
+                botaoSelecionado = i;
+                glutPostRedisplay();
+                return;
+            }
+    }
+}
+
+void desenhaInterface(void)
+{
+    if (estadoJogo == ESTADO_JOGANDO) {
+        desenhaMira();
+        desenhaBarraItens();
+        desenhaInformacoes();
+        return;
+    }
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.0f, 0.0f, 0.0f,
+              estadoJogo == ESTADO_MENU_PRINCIPAL ? 0.58f : 0.50f);
+    retangulo(0, 0, larguraJanela, alturaJanela);
+    glDisable(GL_BLEND);
+
+    if (estadoJogo == ESTADO_INSTRUCOES) {
+        desenhaInstrucoes();
+        return;
+    }
+
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL) {
+        desenhaIdentidadeMenuPrincipal();
+    } else {
+        glColor3f(1.0f, 0.86f, 0.30f);
+        desenhaTextoCentralizado(FONTE_TITULO, larguraJanela / 2.0f,
+                                 alturaJanela * 0.72f, "PAUSADO");
+    }
+    desenhaBotao(0, estadoJogo == ESTADO_MENU_PRINCIPAL ? "JOGAR" : "CONTINUAR");
+    if (estadoJogo == ESTADO_MENU_PRINCIPAL) {
+        desenhaBotao(1, "SAIR");
+    } else {
+        desenhaBotao(1, "INSTRUÇÕES");
+        desenhaBotao(2, "SAIR");
+    }
+
+    glColor3f(0.82f, 0.82f, 0.86f);
+    if (estadoJogo == ESTADO_PAUSADO)
+        desenhaTextoCentralizado(FONTE, larguraJanela / 2.0f,
+                                 alturaJanela * 0.035f,
+                                 "ESC ou CONTINUAR volta ao jogo");
 }
 
 
@@ -3786,43 +4233,20 @@ void desenhaMenu(void)
 /* ================================================================== */
 
 
-/* Mira: o mesmo esquema 2D do menu (projeção em pixels, sem
-   profundidade), uma cruz branca com borda preta para aparecer em
-   qualquer fundo */
+/* Mira: uma cruz branca com borda preta, para aparecer em qualquer
+   fundo. Desenhada por desenhaInterface(), já na projeção 2D em pixels,
+   sem profundidade e sem luz (iniciaInterface). */
 void desenhaMira(void)
 {
     float cx = larguraJanela / 2.0f, cy = alturaJanela / 2.0f;
 
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    gluOrtho2D(0, larguraJanela, 0, alturaJanela);
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
     glDisable(GL_TEXTURE_2D);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_FOG);
-
     glColor3f(0.0f, 0.0f, 0.0f);
     retangulo(cx - 11, cy - 3, cx + 11, cy + 3);
     retangulo(cx - 3, cy - 11, cx + 3, cy + 11);
     glColor3f(1.0f, 1.0f, 1.0f);
     retangulo(cx - 9, cy - 1, cx + 9, cy + 1);
     retangulo(cx - 1, cy - 9, cx + 1, cy + 9);
-
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_FOG);
-    glEnable(GL_LIGHTING);
-    glEnable(GL_TEXTURE_2D);
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
 }
 
 const char *nomeDoTipo(int tipo)
@@ -3856,7 +4280,7 @@ void atualizaTitulo(int fps)
 
     n = snprintf(titulo, sizeof titulo,
                  "Minecraft | %d FPS | Vida %d | Bloco: %s | %s | Itens:",
-                 fps, vidaJogador, nomeDoTipo(tipoSelecionado),
+                 fps, vidaJogador, nomeDoTipo(tiposItens[itemSelecionado]),
                  ehNoite() ? "noite" : "dia");
 
     for (tipo = 0; tipo < NUM_TIPOS; tipo++)
@@ -3938,11 +4362,12 @@ void desenha(void)
         desenhaAgua();
         desenhaFogo();
         desenhaContorno();                  /* depois da cena, por cima */
-        desenhaMira();
     }
 
-    if (menuAberto)
-        desenhaMenu();
+    /* interface 2D (semana 10): mira, barra e menus, por cima de tudo */
+    iniciaInterface();
+    desenhaInterface();
+    terminaInterface();
 
     glutSwapBuffers();
 
@@ -3951,6 +4376,7 @@ void desenha(void)
     int agora = glutGet(GLUT_ELAPSED_TIME);
     if (agora - inicioContagem >= 1000) {
         fps = quadros;
+        fpsExibido = quadros;               /* para o texto da interface */
         quadros = 0;
         inicioContagem = agora;
         tituloSujo = 1;
@@ -3977,6 +4403,29 @@ int main(int argc, char **argv)
     glutInitWindowSize(larguraJanela, alturaJanela);
     glutCreateWindow("Minecraft");
 
+#ifdef _WIN32
+    /* Maximiza a janela mantendo a moldura e a barra de título, e usa
+       o ícone embutido no executável nos dois tamanhos da janela. */
+    {
+        HWND janela = GetForegroundWindow();
+        HINSTANCE modulo = GetModuleHandle(NULL);
+        HICON iconeGrande = (HICON)LoadImage(
+            modulo, MAKEINTRESOURCE(IDI_MINECRAFT), IMAGE_ICON,
+            32, 32, LR_DEFAULTSIZE);
+        HICON iconePequeno = (HICON)LoadImage(
+            modulo, MAKEINTRESOURCE(IDI_MINECRAFT), IMAGE_ICON,
+            16, 16, LR_DEFAULTSIZE);
+
+        if (janela != NULL) {
+            if (iconeGrande != NULL)
+                SendMessage(janela, WM_SETICON, ICON_BIG, (LPARAM)iconeGrande);
+            if (iconePequeno != NULL)
+                SendMessage(janela, WM_SETICON, ICON_SMALL, (LPARAM)iconePequeno);
+            ShowWindow(janela, SW_MAXIMIZE);
+        }
+    }
+#endif
+
 #ifndef __APPLE__
     /* a GLEW só pode ser iniciada depois que a janela existe */
     GLenum err = glewInit();
@@ -3994,6 +4443,7 @@ int main(int argc, char **argv)
     inicializaTexturas();                   /* texturas procedurais em memória */
     inicializaIluminacao();                 /* pipeline fixo do OpenGL 1.0 */
     inicializaShaders();                    /* água e fogo animados em GLSL */
+    carregaTexturasUI();                    /* lê os elementos gráficos do menu */
 
     /* as teclas são lidas por estado: a repetição automática do sistema
        operacional não acrescenta nada e é desligada */
@@ -4037,7 +4487,7 @@ int main(int argc, char **argv)
 
     srand((unsigned)time(NULL));            /* onde os inimigos surgem */
     construirMundo();                       /* preenche a matriz, uma vez só */
-    capturaCursor();                        /* o mouse já começa controlando o olhar */
+    liberaCursor();                         /* menu inicial: cursor visivel */
 
     ultimoTempo = glutGet(GLUT_ELAPSED_TIME);
     inicioContagem = ultimoTempo;
