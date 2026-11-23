@@ -1,6 +1,6 @@
 # minecraft-cg
 
-![Demonstração: menu principal, o personagem recolhe itens, quebra blocos e monta uma torre de pedra pela barra de itens, pula, enfrenta zumbis à noite sob a lâmpada, a demonstração de iluminação e o menu de pausa](midia/demo.webp)
+![Demonstração: menu principal, o personagem recolhe itens, quebra blocos e monta uma torre de pedra pela barra de itens, pula, enfrenta zumbis à noite sob a lâmpada, a demonstração de iluminação e o menu de pausa](midia/demo-jogo-integrado.webp)
 
 Um jogo no estilo Minecraft feito em C com OpenGL, como material da disciplina de Computação Gráfica. Quase tudo usa o pipeline fixo; só a água e a fogueira usam shaders GLSL.
 
